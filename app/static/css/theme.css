@@ -464,3 +464,117 @@ tr:hover {
     border-radius: 4px;
     transition: width 0.3s ease;
 }
+
+/* Stat cards (dashboard) */
+.stat-card {
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+}
+
+.stat-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.stat-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+/* Small buttons */
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+}
+
+.btn-cancel {
+    background-color: var(--bg-tertiary);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+}
+
+.btn-cancel:hover {
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+}
+
+.btn-warn {
+    background-color: rgba(243, 156, 18, 0.15);
+    color: var(--accent-amber);
+    border: 1px solid var(--accent-amber);
+}
+
+.btn-edit {
+    background-color: rgba(79, 142, 247, 0.15);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+}
+
+/* Nav icons */
+.nav-icon {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 10px;
+    opacity: 0.7;
+}
+
+.nav-item.active .nav-icon {
+    opacity: 1;
+}
+
+/* Uploads grid */
+.uploads-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.dropzone-icon {
+    margin-bottom: 8px;
+    opacity: 0.5;
+}
+
+.dropzone-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 4px;
+}
+
+.dropzone-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.dropzone-filename {
+    font-size: 0.82rem;
+    margin-top: 8px;
+    font-weight: 500;
+}
+
+/* Modal body */
+.modal-body hr {
+    border: none;
+    border-top: 1px solid var(--border);
+}
+
+/* Responsive */
+@media (max-width: 1280px) {
+    .uploads-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .stepper {
+        flex-wrap: wrap;
+    }
+
+    .stepper-step {
+        flex: none;
+        width: calc(25% - 6px);
+    }
+}

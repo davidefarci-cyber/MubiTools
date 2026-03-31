@@ -30,9 +30,25 @@ const Auth = {
         return !!this.getToken();
     },
 
+    isAdmin() {
+        const user = this.getUser();
+        return user && user.role === 'admin';
+    },
+
     authHeaders() {
         const token = this.getToken();
         return token ? { 'Authorization': `Bearer ${token}` } : {};
+    },
+
+    async apiRequest(url, options = {}) {
+        const headers = { ...this.authHeaders(), ...options.headers };
+        const res = await fetch(url, { ...options, headers });
+        if (res.status === 401) {
+            this.clearSession();
+            window.location.reload();
+            return null;
+        }
+        return res;
     },
 
     async login(username, password) {

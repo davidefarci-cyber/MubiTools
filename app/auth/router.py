@@ -2,13 +2,14 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.admin.service import verify_password
 from app.auth.dependencies import get_current_user
 from app.auth.jwt import create_access_token
+from app.auth.rate_limit import RateLimitExceeded, check_rate_limit
 from app.database import get_db
 from app.models import User, log_audit
 
@@ -43,8 +44,16 @@ class UserProfile(BaseModel):
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(request: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
-    """Autentica l'utente e restituisce un token JWT."""
+def login(request: LoginRequest, req: Request, db: Session = Depends(get_db)) -> LoginResponse:
+    """Autentica l'utente e restituisce un token JWT (max 5 tentativi/min per IP)."""
+    client_ip = req.client.host if req.client else "unknown"
+    try:
+        check_rate_limit(client_ip)
+    except RateLimitExceeded:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Troppi tentativi di login. Riprova tra un minuto.",
+        )
     user = db.query(User).filter(User.username == request.username).first()
     if user is None:
         raise HTTPException(
