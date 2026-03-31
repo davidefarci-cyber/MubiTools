@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MUBI Tools</title>
+    <link rel="stylesheet" href="/static/css/theme.css">
+</head>
+<body>
+
+    <!-- Login Page -->
+    <div id="login-page" class="login-container">
+        <div class="login-card">
+            <h2>MUBI Tools</h2>
+            <p class="subtitle">Accedi per continuare</p>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%;margin-top:8px;">Accedi</button>
+            </form>
+            <div id="login-error" style="color:var(--accent-red);text-align:center;margin-top:12px;font-size:0.85rem;display:none;"></div>
+        </div>
+    </div>
+
+    <!-- App Layout (hidden until login) -->
+    <div id="app-layout" class="app-layout" style="display:none;">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <h1>MUBI Tools</h1>
+                <span id="app-version"></span>
+            </div>
+            <nav class="sidebar-nav" id="sidebar-nav">
+                <!-- Populated by JS based on user modules -->
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-name" id="user-display-name"></div>
+                    <div id="user-role"></div>
+                </div>
+                <button class="btn" style="width:100%;margin-top:12px;background:var(--bg-tertiary);color:var(--text-muted);" id="btn-logout">Esci</button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <header class="topbar">
+                <div class="breadcrumb" id="breadcrumb">Dashboard</div>
+                <div class="version-badge" id="version-badge"></div>
+            </header>
+            <main class="content" id="main-content">
+                <!-- Content loaded dynamically by JS -->
+            </main>
+        </div>
+    </div>
+
+    <!-- Toast container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Scripts -->
+    <script src="/static/js/auth.js"></script>
+    <script src="/static/js/admin.js"></script>
+    <script src="/static/js/modules/incassi.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

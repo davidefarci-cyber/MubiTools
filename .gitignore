@@ -1,0 +1,36 @@
+# Environment
+.env
+venv/
+.venv/
+
+# Database
+database/*.db
+
+# Uploads
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# NSSM
+install/nssm.exe
