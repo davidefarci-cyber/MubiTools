@@ -1,17 +1,16 @@
 """Router autenticazione: login, logout, profilo utente."""
 
-import json
 from datetime import datetime, timezone
 
-import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.admin.service import verify_password
 from app.auth.dependencies import get_current_user
 from app.auth.jwt import create_access_token
 from app.database import get_db
-from app.models import User
+from app.models import User, log_audit
 
 router = APIRouter()
 
@@ -57,10 +56,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Account disabilitato",
         )
-    if not bcrypt.checkpw(
-        request.password.encode("utf-8"),
-        user.hashed_password.encode("utf-8"),
-    ):
+    if not verify_password(request.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenziali non valide",
@@ -70,11 +66,13 @@ def login(request: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse
     user.last_login = datetime.now(timezone.utc)
     db.commit()
 
-    modules = json.loads(user.allowed_modules) if user.allowed_modules else []
+    modules = user.get_modules()
 
     token = create_access_token(
         data={"sub": user.username, "role": user.role, "modules": modules}
     )
+
+    log_audit(db, "user_login", user_id=user.id, detail={"username": user.username})
 
     return LoginResponse(
         access_token=token,
@@ -88,10 +86,9 @@ def login(request: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse
 @router.get("/me", response_model=UserProfile)
 def get_me(current_user: User = Depends(get_current_user)) -> UserProfile:
     """Restituisce i dati dell'utente corrente."""
-    modules = json.loads(current_user.allowed_modules) if current_user.allowed_modules else []
     return UserProfile(
         username=current_user.username,
         full_name=current_user.full_name,
         role=current_user.role,
-        allowed_modules=modules,
+        allowed_modules=current_user.get_modules(),
     )

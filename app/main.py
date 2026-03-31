@@ -1,5 +1,6 @@
 """MUBI Tools — FastAPI entrypoint."""
 
+import logging
 import time
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
@@ -11,12 +12,14 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.database import Base, engine
+from app.database import Base, SessionLocal, engine
+from app.logging_config import setup_logging
 from app.auth.router import router as auth_router
 from app.admin.router import router as admin_router
 from app.modules.incassi_mubi.router import router as incassi_router
 from app.admin.service import ensure_admin_exists
-from app.database import SessionLocal
+
+logger = logging.getLogger(__name__)
 
 START_TIME: float = time.time()
 
@@ -24,12 +27,17 @@ START_TIME: float = time.time()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Crea le tabelle del database e le cartelle necessarie all'avvio."""
+    # Setup logging
+    setup_logging()
+    logger.info("MUBI Tools v%s — avvio in corso", settings.version)
+
     # Crea cartelle se non esistono
     settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     settings.LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     # Crea tabelle database
     Base.metadata.create_all(bind=engine)
+    logger.info("Database inizializzato: %s", settings.DATABASE_URL)
 
     # Crea utente admin di default se DB vuoto
     db = SessionLocal()
@@ -38,7 +46,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     finally:
         db.close()
 
+    logger.info("Servizio pronto su porta %d", settings.PORT)
     yield
+    logger.info("MUBI Tools — shutdown")
 
 
 app = FastAPI(

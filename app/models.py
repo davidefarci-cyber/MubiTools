@@ -1,9 +1,10 @@
 """Modelli ORM per il database MUBI Tools."""
 
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from app.database import Base
 
@@ -25,11 +26,30 @@ class User(Base):
 
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user")
 
+    def get_modules(self) -> list[str]:
+        """Restituisce la lista dei moduli abilitati."""
+        if self.allowed_modules:
+            return json.loads(self.allowed_modules)
+        return []
+
+    def set_modules(self, modules: list[str]) -> None:
+        """Imposta la lista dei moduli abilitati."""
+        self.allowed_modules = json.dumps(modules)
+
+    def has_module(self, module_name: str) -> bool:
+        """Verifica se l'utente ha accesso a un modulo."""
+        return module_name in self.get_modules()
+
 
 class AuditLog(Base):
     """Log di audit per tracciare ogni operazione significativa."""
 
     __tablename__ = "audit_log"
+    __table_args__ = (
+        Index("ix_audit_log_timestamp", "timestamp"),
+        Index("ix_audit_log_action", "action"),
+        Index("ix_audit_log_user_id", "user_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
@@ -38,3 +58,32 @@ class AuditLog(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped[User | None] = relationship(back_populates="audit_logs")
+
+
+def log_audit(
+    db: Session,
+    action: str,
+    *,
+    user_id: int | None = None,
+    detail: dict | str | None = None,
+) -> AuditLog:
+    """Registra un'azione nell'audit log.
+
+    Args:
+        db: Sessione database.
+        action: Tipo azione (es. 'incassi_upload', 'user_created').
+        user_id: ID utente che ha eseguito l'azione (opzionale per azioni di sistema).
+        detail: Dettagli aggiuntivi (dict serializzato in JSON, o stringa).
+    """
+    if isinstance(detail, dict):
+        detail = json.dumps(detail, ensure_ascii=False)
+    entry = AuditLog(
+        user_id=user_id,
+        action=action,
+        detail=detail,
+        timestamp=datetime.now(timezone.utc),
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
