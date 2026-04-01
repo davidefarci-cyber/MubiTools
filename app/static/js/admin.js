@@ -25,6 +25,12 @@ const Admin = {
                 </div>
             </div>
             <div class="card">
+                <div class="card-title">Aggiornamenti</div>
+                <div id="admin-updates">
+                    <div class="spinner" style="margin:20px auto;"></div>
+                </div>
+            </div>
+            <div class="card">
                 <div class="card-title">Audit Log</div>
                 <div id="admin-audit-log">
                     <div class="spinner" style="margin:20px auto;"></div>
@@ -34,6 +40,7 @@ const Admin = {
         document.getElementById('btn-add-user').addEventListener('click', () => this.showCreateUserModal());
         this.loadUsers();
         this.loadSystemInfo();
+        this.loadUpdates();
         this.loadAuditLog();
     },
 
@@ -316,6 +323,137 @@ const Admin = {
         } catch {
             container.innerHTML = '<p style="color:var(--accent-red)">Impossibile contattare il servizio</p>';
         }
+    },
+
+    // --- Aggiornamenti ---
+
+    async loadUpdates() {
+        const container = document.getElementById('admin-updates');
+        try {
+            const res = await Auth.apiRequest('/admin/updates/branches');
+            if (!res.ok) throw new Error('Errore caricamento branch');
+            const data = await res.json();
+
+            const options = data.branches.map(b => {
+                const selected = b.name === data.current_branch ? 'selected' : '';
+                return `<option value="${App.escapeHtml(b.name)}" ${selected}>${App.escapeHtml(b.name)} (${App.escapeHtml(b.sha)})</option>`;
+            }).join('');
+
+            container.innerHTML = `
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Branch corrente</div>
+                        <div class="stat-value">${App.escapeHtml(data.current_branch)}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Branch disponibili</div>
+                        <div class="stat-value">${data.branches.length}</div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px;">
+                    <select id="branch-select" style="padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);font-size:0.9rem;">
+                        ${options}
+                    </select>
+                    <button class="btn btn-primary btn-sm" id="btn-check-updates">Controlla aggiornamenti</button>
+                </div>
+                <div id="update-check-result"></div>`;
+
+            document.getElementById('btn-check-updates').addEventListener('click', () => {
+                const branch = document.getElementById('branch-select').value;
+                this.checkForUpdates(branch);
+            });
+        } catch (err) {
+            container.innerHTML = `<p style="color:var(--accent-red)">${App.escapeHtml(err.message)}</p>`;
+        }
+    },
+
+    async checkForUpdates(branch) {
+        const result = document.getElementById('update-check-result');
+        result.innerHTML = '<div class="spinner" style="margin:12px auto;"></div>';
+        try {
+            const res = await Auth.apiRequest(`/admin/updates/check?branch=${encodeURIComponent(branch)}`);
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore controllo aggiornamenti');
+            }
+            const data = await res.json();
+
+            const statusColor = data.update_available ? 'var(--accent-yellow, #f0ad4e)' : 'var(--accent-green)';
+            const statusText = data.update_available
+                ? `${data.commits_behind} commit da scaricare`
+                : 'Nessun aggiornamento disponibile';
+
+            let applyBtn = '';
+            if (data.update_available) {
+                applyBtn = `<button class="btn btn-primary btn-sm" id="btn-apply-update" style="margin-top:12px;">Applica aggiornamento</button>`;
+            }
+
+            result.innerHTML = `
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:8px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Stato</div>
+                        <div class="stat-value" style="color:${statusColor};font-size:0.95rem;">${statusText}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">SHA locale</div>
+                        <div class="stat-value" style="font-family:monospace;font-size:0.95rem;">${App.escapeHtml(data.local_sha)}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">SHA remoto</div>
+                        <div class="stat-value" style="font-family:monospace;font-size:0.95rem;">${App.escapeHtml(data.remote_sha)}</div>
+                    </div>
+                </div>
+                ${data.commits_ahead > 0 ? `<p style="color:var(--text-muted);font-size:0.85rem;margin:4px 0;">${data.commits_ahead} commit locali in avanti rispetto al remoto</p>` : ''}
+                ${applyBtn}`;
+
+            const applyBtnEl = document.getElementById('btn-apply-update');
+            if (applyBtnEl) {
+                applyBtnEl.addEventListener('click', () => this.applyUpdate(branch));
+            }
+        } catch (err) {
+            result.innerHTML = `<p style="color:var(--accent-red)">${App.escapeHtml(err.message)}</p>`;
+        }
+    },
+
+    applyUpdate(branch) {
+        showModal(
+            'Conferma aggiornamento',
+            `<p>Vuoi aggiornare al branch <strong>${App.escapeHtml(branch)}</strong>?</p>
+             <p style="color:var(--text-muted);font-size:0.85rem;">L'applicazione potrebbe richiedere un riavvio dopo l'aggiornamento.</p>`,
+            [
+                { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+                {
+                    label: 'Aggiorna',
+                    class: 'btn-primary',
+                    onClick: async () => {
+                        closeModal();
+                        const result = document.getElementById('update-check-result');
+                        result.innerHTML = '<div class="spinner" style="margin:12px auto;"></div><p style="text-align:center;color:var(--text-muted);">Aggiornamento in corso...</p>';
+                        try {
+                            const res = await Auth.apiRequest('/admin/updates/apply', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ branch })
+                            });
+                            if (!res.ok) {
+                                const err = await res.json();
+                                throw new Error(err.detail || 'Errore aggiornamento');
+                            }
+                            const data = await res.json();
+                            const msg = data.restart_required
+                                ? `Aggiornamento completato (${data.old_sha} → ${data.new_sha}). Riavvio consigliato.`
+                                : `Aggiornamento completato. Nessuna modifica rilevata.`;
+                            showToast(msg, 'success');
+                            this.loadUpdates();
+                            this.loadSystemInfo();
+                        } catch (err) {
+                            showToast(err.message, 'error');
+                            result.innerHTML = `<p style="color:var(--accent-red)">${App.escapeHtml(err.message)}</p>`;
+                        }
+                    }
+                },
+            ]
+        );
     },
 
     // --- Audit Log ---

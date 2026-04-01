@@ -1,13 +1,18 @@
 """Router pannello admin: gestione utenti, aggiornamenti, audit log."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.admin import service as admin_service
+from app.admin import update_service
 from app.auth.dependencies import require_admin
 from app.database import get_db
-from app.models import User
+from app.models import User, log_audit
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -50,6 +55,12 @@ class ResetPasswordRequest(BaseModel):
     """Schema reset password."""
 
     new_password: str = Field(min_length=8)
+
+
+class ApplyUpdateRequest(BaseModel):
+    """Schema richiesta aggiornamento."""
+
+    branch: str = Field(default="main", min_length=1)
 
 
 class AuditLogOut(BaseModel):
@@ -184,3 +195,61 @@ def get_audit_log(
             for log in logs
         ],
     }
+
+
+# --- Aggiornamenti ---
+
+@router.get("/updates/branches")
+def list_branches(admin: User = Depends(require_admin)) -> dict:
+    """Elenca i branch remoti disponibili."""
+    try:
+        branches = update_service.list_remote_branches()
+        current = update_service.get_current_branch()
+        return {"current_branch": current, "branches": branches}
+    except Exception as exc:
+        logger.exception("Errore lettura branch remoti")
+        raise HTTPException(status_code=500, detail=f"Errore git: {exc}") from exc
+
+
+@router.get("/updates/check")
+def check_updates(
+    branch: str = "main",
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Controlla se ci sono aggiornamenti per il branch specificato."""
+    try:
+        result = update_service.check_for_updates(branch)
+        log_audit(db, "update_check", user_id=admin.id,
+                  detail=f'{{"branch":"{branch}","behind":{result["commits_behind"]}}}')
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Errore controllo aggiornamenti")
+        raise HTTPException(status_code=500, detail=f"Errore git: {exc}") from exc
+
+
+@router.post("/updates/apply")
+def apply_update(
+    request: ApplyUpdateRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Applica l'aggiornamento dal branch selezionato."""
+    try:
+        result = update_service.apply_update(request.branch)
+        log_audit(
+            db, "update_applied", user_id=admin.id,
+            detail=(
+                f'{{"branch":"{result["new_branch"]}",'
+                f'"old_sha":"{result["old_sha"]}",'
+                f'"new_sha":"{result["new_sha"]}"}}'
+            ),
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Errore applicazione aggiornamento")
+        raise HTTPException(status_code=500, detail=f"Errore git: {exc}") from exc
