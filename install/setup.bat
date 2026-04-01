@@ -62,6 +62,8 @@ python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo   ERRORE: Python non disponibile dopo installazione.
     echo   Installare manualmente Python 3.11+ e aggiungerlo al PATH.
+    echo   Nota: dopo l'installazione chiudere e riaprire il Prompt dei comandi,
+    echo   poi rilanciare questo setup.bat.
     echo [%date% %time%] ERRORE: Python non disponibile >> "%LOG_FILE%"
     pause
     exit /b 1
