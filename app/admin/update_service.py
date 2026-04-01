@@ -92,7 +92,7 @@ def apply_update(branch: str = "main") -> dict:
     """
     repo = _get_repo()
 
-    if repo.is_dirty(untracked_files=True):
+    if repo.is_dirty():
         raise ValueError(
             "Working tree con modifiche non committate. "
             "Committare o scartare le modifiche prima di aggiornare."
