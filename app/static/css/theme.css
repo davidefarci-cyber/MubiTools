@@ -413,6 +413,11 @@ tr:hover {
     color: var(--accent-green);
 }
 
+.stepper-step.error {
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+}
+
 /* Modal */
 .modal-overlay {
     position: fixed;
