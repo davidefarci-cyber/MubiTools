@@ -79,7 +79,7 @@ def _normalize_date(val: object) -> pd.Timestamp | None:
 def fase1_parse_incassi(file_path: Path) -> pd.DataFrame:
     """Parsa il file TXT esportato da Mubi e lo converte in DataFrame.
 
-    Rileva automaticamente il separatore (tab, punto e virgola, pipe).
+    Rileva automaticamente il separatore (tab, punto e virgola, pipe, virgola).
     Normalizza date e importi.
     """
     logger.info("FASE 1: Parsing file incassi %s", file_path.name)
@@ -88,11 +88,8 @@ def fase1_parse_incassi(file_path: Path) -> pd.DataFrame:
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         sample = f.read(4096)
 
-    sep = "\t"
-    if sample.count(";") > sample.count("\t"):
-        sep = ";"
-    elif sample.count("|") > sample.count("\t") and sample.count("|") > sample.count(";"):
-        sep = "|"
+    candidates = {"\t": sample.count("\t"), ";": sample.count(";"), "|": sample.count("|"), ",": sample.count(",")}
+    sep = max(candidates, key=candidates.get) if any(candidates.values()) else ","
 
     logger.info("  Separatore rilevato: %r", sep)
 
