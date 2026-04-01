@@ -1,13 +1,17 @@
 """Router pannello admin: gestione utenti, aggiornamenti, audit log."""
 
+import logging
+from threading import Thread
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.admin import service as admin_service
 from app.auth.dependencies import require_admin
-from app.database import get_db
-from app.models import User
+from app.config import settings
+from app.database import SessionLocal, get_db
+from app.models import User, log_audit
 
 router = APIRouter()
 
@@ -183,4 +187,79 @@ def get_audit_log(
             }
             for log in logs
         ],
+    }
+
+
+# --- Update System ---
+
+logger = logging.getLogger(__name__)
+
+_update_status: dict = {"running": False, "result": None}
+
+
+@router.get("/update/check")
+def check_updates(admin: User = Depends(require_admin)) -> dict:
+    """Controlla se ci sono aggiornamenti disponibili su GitHub."""
+    from scripts.update import check_for_updates
+
+    return check_for_updates(settings.GITHUB_REPO)
+
+
+@router.post("/update")
+def start_update(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Avvia l'aggiornamento da GitHub (solo admin)."""
+    if _update_status["running"]:
+        raise HTTPException(status_code=409, detail="Aggiornamento gia' in corso")
+
+    _update_status["running"] = True
+    _update_status["result"] = None
+
+    log_audit(
+        db, "system_update_start",
+        user_id=admin.id,
+        detail={"github_repo": settings.GITHUB_REPO},
+    )
+
+    def _run_update() -> None:
+        try:
+            from scripts.update import perform_update
+
+            result = perform_update(settings.GITHUB_REPO)
+            _update_status["result"] = result
+
+            # Log risultato nel DB
+            update_db = SessionLocal()
+            try:
+                log_audit(
+                    update_db,
+                    "system_update_complete" if result["success"] else "system_update_failed",
+                    user_id=admin.id,
+                    detail={
+                        "new_version": result.get("new_version"),
+                        "success": result["success"],
+                    },
+                )
+            finally:
+                update_db.close()
+        except Exception as e:
+            logger.exception("Aggiornamento fallito: %s", e)
+            _update_status["result"] = {"success": False, "log": [{"step": "error", "success": False, "output": str(e)}]}
+        finally:
+            _update_status["running"] = False
+
+    thread = Thread(target=_run_update, daemon=True)
+    thread.start()
+
+    return {"status": "started", "message": "Aggiornamento avviato"}
+
+
+@router.get("/update/status")
+def get_update_status(admin: User = Depends(require_admin)) -> dict:
+    """Stato dell'aggiornamento in corso."""
+    return {
+        "running": _update_status["running"],
+        "result": _update_status["result"],
     }
