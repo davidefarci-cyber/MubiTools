@@ -47,26 +47,23 @@ REM ─── STEP 2: Verifica e installazione Python ────────�
 echo.
 echo [STEP 2/13] Verifica Python 3.11+...
 python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo   Python non trovato. Download in corso...
-    echo [%date% %time%] Python non trovato, download... >> "%LOG_FILE%"
-    powershell -Command "Invoke-WebRequest -Uri '%PYTHON_URL%' -OutFile '%TEMP%\python_installer.exe'" 2>>"%LOG_FILE%"
-    if not exist "%TEMP%\python_installer.exe" (
-        echo   ERRORE: Download Python fallito. Verificare la connessione internet.
-        echo [%date% %time%] ERRORE: Download Python fallito >> "%LOG_FILE%"
-        pause
-        exit /b 1
-    )
-    echo   Installazione Python in corso (silenzioso)...
-    "%TEMP%\python_installer.exe" /quiet InstallAllUsers=1 PrependPath=1 Include_pip=1
-    del "%TEMP%\python_installer.exe" 2>nul
-    REM Ricarica PATH
-    set "PATH=%PATH%;C:\Program Files\Python311;C:\Program Files\Python311\Scripts"
-)
+if %errorlevel% equ 0 goto step2_done
+echo   Python non trovato. Download in corso...
+echo [%date% %time%] Python non trovato, download... >> "%LOG_FILE%"
+powershell -Command "Invoke-WebRequest -Uri '%PYTHON_URL%' -OutFile '%TEMP%\python_installer.exe'" 2>>"%LOG_FILE%"
+if not exist "%TEMP%\python_installer.exe" goto step2_download_failed
+echo   Installazione Python in corso (silenzioso)...
+"%TEMP%\python_installer.exe" /quiet InstallAllUsers=1 PrependPath=1 Include_pip=1
+del "%TEMP%\python_installer.exe" 2>nul
+REM Ricarica PATH
+set "PATH=%PATH%;C:\Program Files\Python311;C:\Program Files\Python311\Scripts"
+:step2_done
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo   ERRORE: Python non disponibile dopo installazione.
     echo   Installare manualmente Python 3.11+ e aggiungerlo al PATH.
+    echo   Nota: dopo l'installazione chiudere e riaprire il Prompt dei comandi,
+    echo   poi rilanciare questo setup.bat.
     echo [%date% %time%] ERRORE: Python non disponibile >> "%LOG_FILE%"
     pause
     exit /b 1
@@ -74,26 +71,29 @@ if %errorlevel% neq 0 (
 for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set "PY_VER=%%v"
 echo   OK - Python %PY_VER%
 echo [%date% %time%] STEP 2 OK - Python %PY_VER% >> "%LOG_FILE%"
+goto step3_start
+
+:step2_download_failed
+echo   ERRORE: Download Python fallito. Verificare la connessione internet.
+echo [%date% %time%] ERRORE: Download Python fallito >> "%LOG_FILE%"
+pause
+exit /b 1
 
 REM ─── STEP 3: Verifica e installazione Git ────────────────────
+:step3_start
 echo.
 echo [STEP 3/13] Verifica Git...
 git --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo   Git non trovato. Download in corso...
-    echo [%date% %time%] Git non trovato, download... >> "%LOG_FILE%"
-    powershell -Command "Invoke-WebRequest -Uri '%GIT_URL%' -OutFile '%TEMP%\git_installer.exe'" 2>>"%LOG_FILE%"
-    if not exist "%TEMP%\git_installer.exe" (
-        echo   ERRORE: Download Git fallito.
-        echo [%date% %time%] ERRORE: Download Git fallito >> "%LOG_FILE%"
-        pause
-        exit /b 1
-    )
-    echo   Installazione Git in corso (silenzioso)...
-    "%TEMP%\git_installer.exe" /VERYSILENT /NORESTART /NOCANCEL /SP-
-    del "%TEMP%\git_installer.exe" 2>nul
-    set "PATH=%PATH%;C:\Program Files\Git\bin"
-)
+if %errorlevel% equ 0 goto step3_done
+echo   Git non trovato. Download in corso...
+echo [%date% %time%] Git non trovato, download... >> "%LOG_FILE%"
+powershell -Command "Invoke-WebRequest -Uri '%GIT_URL%' -OutFile '%TEMP%\git_installer.exe'" 2>>"%LOG_FILE%"
+if not exist "%TEMP%\git_installer.exe" goto step3_download_failed
+echo   Installazione Git in corso (silenzioso)...
+"%TEMP%\git_installer.exe" /VERYSILENT /NORESTART /NOCANCEL /SP-
+del "%TEMP%\git_installer.exe" 2>nul
+set "PATH=%PATH%;C:\Program Files\Git\bin"
+:step3_done
 git --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo   ERRORE: Git non disponibile dopo installazione.
@@ -104,8 +104,16 @@ if %errorlevel% neq 0 (
 for /f "tokens=3 delims= " %%v in ('git --version 2^>^&1') do set "GIT_VER=%%v"
 echo   OK - Git %GIT_VER%
 echo [%date% %time%] STEP 3 OK - Git %GIT_VER% >> "%LOG_FILE%"
+goto step4_start
+
+:step3_download_failed
+echo   ERRORE: Download Git fallito.
+echo [%date% %time%] ERRORE: Download Git fallito >> "%LOG_FILE%"
+pause
+exit /b 1
 
 REM ─── STEP 4: Clone del repository ───────────────────────────
+:step4_start
 echo.
 echo [STEP 4/13] Clone repository...
 if exist "%INSTALL_DIR%\.git" (
