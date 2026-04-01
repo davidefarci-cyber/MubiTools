@@ -61,7 +61,7 @@ if %errorlevel% neq 0 (
     "%TEMP%\python_installer.exe" /quiet InstallAllUsers=1 PrependPath=1 Include_pip=1
     del "%TEMP%\python_installer.exe" 2>nul
     REM Ricarica PATH
-    set "PATH=%PATH%;C:\Program Files\Python311;C:\Program Files\Python311\Scripts"
+    set "PATH=!PATH!;C:\Program Files\Python311;C:\Program Files\Python311\Scripts"
 )
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
@@ -92,7 +92,7 @@ if %errorlevel% neq 0 (
     echo   Installazione Git in corso (silenzioso)...
     "%TEMP%\git_installer.exe" /VERYSILENT /NORESTART /NOCANCEL /SP-
     del "%TEMP%\git_installer.exe" 2>nul
-    set "PATH=%PATH%;C:\Program Files\Git\bin"
+    set "PATH=!PATH!;C:\Program Files\Git\bin"
 )
 git --version >nul 2>&1
 if %errorlevel% neq 0 (
