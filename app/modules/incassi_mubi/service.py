@@ -12,6 +12,7 @@ Implementa le 7 fasi di elaborazione:
 
 import logging
 from collections.abc import Callable
+from io import StringIO
 from pathlib import Path
 
 import pandas as pd
@@ -84,19 +85,46 @@ def fase1_parse_incassi(file_path: Path) -> pd.DataFrame:
     """
     logger.info("FASE 1: Parsing file incassi %s", file_path.name)
 
-    # Rileva separatore
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-        sample = f.read(4096)
+    raw_text = file_path.read_text(encoding="utf-8", errors="replace")
+    lines = [line for line in raw_text.splitlines() if line.strip()]
+    candidate_separators = ["\t", ";", "|", ","]
+    best_parse: tuple[int, str, int, pd.DataFrame] | None = None
 
-    sep = "\t"
-    if sample.count(";") > sample.count("\t"):
-        sep = ";"
-    elif sample.count("|") > sample.count("\t") and sample.count("|") > sample.count(";"):
-        sep = "|"
+    # Alcuni export Mubi includono righe descrittive iniziali:
+    # proviamo vari separatori e offset, scegliendo il parse più stabile.
+    max_offset = min(25, max(0, len(lines) - 1))
+    for sep in candidate_separators:
+        for offset in range(max_offset + 1):
+            candidate_lines = lines[offset:]
+            if not candidate_lines:
+                continue
+            if sep not in candidate_lines[0]:
+                continue
+            try:
+                df_candidate = pd.read_csv(
+                    StringIO("\n".join(candidate_lines)),
+                    sep=sep,
+                    dtype=str,
+                    engine="python",
+                )
+            except Exception:
+                continue
+            if df_candidate.empty or len(df_candidate.columns) < 2:
+                continue
 
-    logger.info("  Separatore rilevato: %r", sep)
+            score = len(df_candidate.columns) * len(df_candidate)
+            if best_parse is None or score > best_parse[0]:
+                best_parse = (score, sep, offset, df_candidate)
 
-    df = pd.read_csv(file_path, sep=sep, encoding="utf-8", encoding_errors="replace", dtype=str)
+    if best_parse is None:
+        raise ValueError(
+            "Impossibile interpretare il file incassi: formato non riconosciuto "
+            "(separatore o intestazione non validi)."
+        )
+
+    _, sep, offset, df = best_parse
+    logger.info("  Separatore rilevato: %r (header alla riga %d)", sep, offset + 1)
+
     df.columns = [c.strip() for c in df.columns]
 
     # Strip spazi da tutte le celle stringa
