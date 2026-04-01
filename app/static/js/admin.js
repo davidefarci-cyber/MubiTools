@@ -19,6 +19,12 @@ const Admin = {
                 </div>
             </div>
             <div class="card">
+                <div class="card-title">Aggiornamenti Software</div>
+                <div id="admin-updates">
+                    <div class="spinner" style="margin:20px auto;"></div>
+                </div>
+            </div>
+            <div class="card">
                 <div class="card-title">Informazioni Sistema</div>
                 <div id="admin-system-info">
                     <div class="spinner" style="margin:20px auto;"></div>
@@ -39,6 +45,7 @@ const Admin = {
         `;
         document.getElementById('btn-add-user').addEventListener('click', () => this.showCreateUserModal());
         this.loadUsers();
+        this.loadUpdateInfo();
         this.loadSystemInfo();
         this.loadUpdates();
         this.loadAuditLog();
@@ -296,6 +303,135 @@ const Admin = {
         } catch (err) {
             showToast(err.message, 'error');
         }
+    },
+
+    // --- Updates ---
+
+    async loadUpdateInfo() {
+        const container = document.getElementById('admin-updates');
+        try {
+            const res = await Auth.apiRequest('/admin/update/check');
+            if (!res.ok) throw new Error('Errore controllo aggiornamenti');
+            const data = await res.json();
+
+            const hasUpdate = data.update_available;
+            const errorMsg = data.error ? `<p style="color:var(--accent-amber);font-size:0.85rem;margin-top:8px;">Errore controllo: ${App.escapeHtml(data.error)}</p>` : '';
+
+            container.innerHTML = `
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Versione locale</div>
+                        <div class="stat-value">${data.local_version || '-'}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Versione remota</div>
+                        <div class="stat-value" style="color:${hasUpdate ? 'var(--accent-green)' : 'var(--text-primary)'}">
+                            ${data.remote_version || 'N/D'}
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Stato</div>
+                        <div class="stat-value" style="color:${hasUpdate ? 'var(--accent-amber)' : 'var(--accent-green)'}">
+                            ${hasUpdate ? 'Aggiornamento disponibile' : 'Aggiornato'}
+                        </div>
+                    </div>
+                </div>
+                ${errorMsg}
+                <div style="display:flex;gap:12px;margin-top:8px;">
+                    <button class="btn btn-sm btn-edit" id="btn-check-updates">Controlla Aggiornamenti</button>
+                    ${hasUpdate ? '<button class="btn btn-sm btn-primary" id="btn-do-update">Aggiorna Ora</button>' : ''}
+                </div>
+                <div id="update-log" style="margin-top:16px;display:none;"></div>
+            `;
+
+            document.getElementById('btn-check-updates').addEventListener('click', () => this.loadUpdateInfo());
+            const btnUpdate = document.getElementById('btn-do-update');
+            if (btnUpdate) {
+                btnUpdate.addEventListener('click', () => this.confirmUpdate());
+            }
+        } catch (err) {
+            container.innerHTML = `<p style="color:var(--accent-red)">${App.escapeHtml(err.message)}</p>
+                <button class="btn btn-sm btn-edit" onclick="Admin.loadUpdateInfo()">Riprova</button>`;
+        }
+    },
+
+    confirmUpdate() {
+        showModal(
+            'Conferma Aggiornamento',
+            '<p>Vuoi aggiornare MUBI Tools all\'ultima versione?</p><p style="color:var(--text-muted);font-size:0.85rem;margin-top:8px;">Il sistema eseguira\' git pull, aggiornerà le dipendenze e riavviera\' il servizio.</p>',
+            [
+                { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+                { label: 'Aggiorna Ora', class: 'btn-primary', onClick: () => { closeModal(); this.performUpdate(); } },
+            ]
+        );
+    },
+
+    async performUpdate() {
+        const logDiv = document.getElementById('update-log');
+        if (logDiv) {
+            logDiv.style.display = 'block';
+            logDiv.innerHTML = '<div class="spinner" style="margin:10px auto;"></div><p style="color:var(--text-muted);text-align:center;">Aggiornamento in corso...</p>';
+        }
+
+        try {
+            const res = await Auth.apiRequest('/admin/update', { method: 'POST' });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore avvio aggiornamento');
+            }
+
+            // Poll per risultato
+            this._pollUpdateStatus(logDiv);
+        } catch (err) {
+            if (logDiv) logDiv.innerHTML = `<p style="color:var(--accent-red)">Errore: ${App.escapeHtml(err.message)}</p>`;
+            showToast(err.message, 'error');
+        }
+    },
+
+    async _pollUpdateStatus(logDiv) {
+        const poll = async () => {
+            try {
+                const res = await Auth.apiRequest('/admin/update/status');
+                if (!res.ok) return;
+                const data = await res.json();
+
+                if (data.running) {
+                    setTimeout(poll, 2000);
+                    return;
+                }
+
+                if (data.result) {
+                    const r = data.result;
+                    const logHtml = (r.log || []).map(entry => {
+                        const icon = entry.success ? 'var(--accent-green)' : 'var(--accent-red)';
+                        return `<div style="padding:4px 0;font-size:0.85rem;">
+                            <span style="color:${icon};font-weight:600;">${entry.success ? 'OK' : 'ERR'}</span>
+                            <span style="color:var(--text-muted);margin:0 8px;">${App.escapeHtml(entry.step)}</span>
+                            <span>${App.escapeHtml((entry.output || '').substring(0, 200))}</span>
+                        </div>`;
+                    }).join('');
+
+                    if (logDiv) {
+                        logDiv.innerHTML = `
+                            <div style="background:var(--bg-tertiary);border-radius:var(--radius);padding:12px;margin-top:8px;">
+                                <strong style="color:${r.success ? 'var(--accent-green)' : 'var(--accent-red)'}">
+                                    ${r.success ? 'Aggiornamento completato' : 'Aggiornamento fallito'}
+                                </strong>
+                                ${r.new_version ? `<span style="color:var(--text-muted);margin-left:12px;">v${r.new_version}</span>` : ''}
+                                <div style="margin-top:8px;">${logHtml}</div>
+                            </div>`;
+                    }
+
+                    showToast(
+                        r.success ? 'Aggiornamento completato' : 'Aggiornamento fallito',
+                        r.success ? 'success' : 'error'
+                    );
+                }
+            } catch {
+                if (logDiv) logDiv.innerHTML = '<p style="color:var(--accent-red)">Errore nel polling stato aggiornamento</p>';
+            }
+        };
+        setTimeout(poll, 2000);
     },
 
     // --- System info ---

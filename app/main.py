@@ -1,8 +1,15 @@
 """MUBI Tools — FastAPI entrypoint."""
 
 import logging
+import sys
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+# Aggiungi root del progetto al path per importare scripts/
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 from collections.abc import AsyncGenerator
 from pathlib import Path
 

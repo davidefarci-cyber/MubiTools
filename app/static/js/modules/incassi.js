@@ -10,6 +10,14 @@ const Incassi = {
         conferimento: null,
         piani: null,
     },
+    fileIds: {
+        incassi: null,
+        massivo: null,
+        conferimento: null,
+        piani: null,
+    },
+    jobId: null,
+    pollTimer: null,
 
     fileConfigs: [
         { key: 'incassi', label: 'File Incassi/Insoluti', accept: '.txt,.csv', required: true },
@@ -29,10 +37,10 @@ const Incassi = {
     ],
 
     render(container) {
-        this.files = { incassi: null, massivo: null, conferimento: null, piani: null };
+        this.reset();
 
         const stepperHtml = this.steps.map((s, i) =>
-            `<div class="stepper-step${i === 0 ? ' active' : ''}" data-step="${i}">${s}</div>`
+            `<div class="stepper-step" data-step="${i}">${s}</div>`
         ).join('');
 
         const uploadsHtml = this.fileConfigs.map(cfg => `
@@ -54,18 +62,18 @@ const Incassi = {
         container.innerHTML = `
             <div class="card">
                 <div class="card-title">Elaborazione Incassi</div>
-                <div class="stepper">${stepperHtml}</div>
+                <div class="stepper" id="incassi-stepper">${stepperHtml}</div>
 
-                <div class="uploads-grid">${uploadsHtml}</div>
+                <div class="uploads-grid" id="uploads-section">${uploadsHtml}</div>
 
-                <div style="margin-top:24px;display:flex;gap:12px;align-items:center;">
+                <div style="margin-top:24px;display:flex;gap:12px;align-items:center;" id="action-buttons">
                     <button class="btn btn-primary" id="btn-process" disabled>Avvia Elaborazione</button>
                     <button class="btn btn-cancel" id="btn-clear" style="display:none;">Cancella file</button>
                 </div>
 
-                <div id="incassi-progress" style="margin-top:16px;display:none;">
+                <div id="incassi-progress" style="margin-top:20px;display:none;">
                     <div class="progress-bar"><div class="progress-bar-fill" id="progress-fill" style="width:0%"></div></div>
-                    <p style="margin-top:8px;color:var(--text-muted);font-size:0.85rem;" id="progress-text"></p>
+                    <p style="margin-top:8px;color:var(--text-muted);font-size:0.85rem;" id="progress-text">Preparazione...</p>
                 </div>
 
                 <div id="incassi-results" style="margin-top:24px;display:none;"></div>
@@ -77,22 +85,25 @@ const Incassi = {
         document.getElementById('btn-clear').addEventListener('click', () => this.clearFiles());
     },
 
+    reset() {
+        this.files = { incassi: null, massivo: null, conferimento: null, piani: null };
+        this.fileIds = { incassi: null, massivo: null, conferimento: null, piani: null };
+        this.jobId = null;
+        if (this.pollTimer) clearInterval(this.pollTimer);
+        this.pollTimer = null;
+    },
+
     bindUploadEvents() {
         this.fileConfigs.forEach(cfg => {
             const dropzone = document.getElementById(`drop-${cfg.key}`);
             const input = document.getElementById(`finput-${cfg.key}`);
 
-            // Click to upload
             dropzone.addEventListener('click', () => input.click());
 
-            // File input change
             input.addEventListener('change', () => {
-                if (input.files.length > 0) {
-                    this.setFile(cfg.key, input.files[0]);
-                }
+                if (input.files.length > 0) this.handleFile(cfg.key, input.files[0]);
             });
 
-            // Drag & drop
             dropzone.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 dropzone.classList.add('dragover');
@@ -103,26 +114,49 @@ const Incassi = {
             dropzone.addEventListener('drop', (e) => {
                 e.preventDefault();
                 dropzone.classList.remove('dragover');
-                if (e.dataTransfer.files.length > 0) {
-                    this.setFile(cfg.key, e.dataTransfer.files[0]);
-                }
+                if (e.dataTransfer.files.length > 0) this.handleFile(cfg.key, e.dataTransfer.files[0]);
             });
         });
     },
 
-    setFile(key, file) {
-        this.files[key] = file;
+    async handleFile(key, file) {
         const fnameEl = document.getElementById(`fname-${key}`);
         const dropzone = document.getElementById(`drop-${key}`);
 
-        if (file) {
-            const size = (file.size / 1024).toFixed(1);
-            fnameEl.textContent = `${file.name} (${size} KB)`;
+        // Show uploading state
+        fnameEl.textContent = `Caricamento ${file.name}...`;
+        fnameEl.style.color = 'var(--accent-amber)';
+        dropzone.style.borderColor = 'var(--accent-amber)';
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const res = await Auth.apiRequest('/api/incassi/upload', {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore upload');
+            }
+
+            const data = await res.json();
+            this.files[key] = file;
+            this.fileIds[key] = data.file_id;
+
+            const size = (data.size_bytes / 1024).toFixed(1);
+            fnameEl.textContent = `${data.original_filename} (${size} KB)`;
             fnameEl.style.color = 'var(--accent-green)';
             dropzone.style.borderColor = 'var(--accent-green)';
-        } else {
-            fnameEl.textContent = '';
-            dropzone.style.borderColor = '';
+
+        } catch (err) {
+            fnameEl.textContent = `Errore: ${err.message}`;
+            fnameEl.style.color = 'var(--accent-red)';
+            dropzone.style.borderColor = 'var(--accent-red)';
+            this.files[key] = null;
+            this.fileIds[key] = null;
         }
 
         this.updateProcessButton();
@@ -131,7 +165,7 @@ const Incassi = {
     updateProcessButton() {
         const allRequired = this.fileConfigs
             .filter(c => c.required)
-            .every(c => this.files[c.key] !== null);
+            .every(c => this.fileIds[c.key] !== null);
 
         document.getElementById('btn-process').disabled = !allRequired;
 
@@ -142,6 +176,7 @@ const Incassi = {
     clearFiles() {
         this.fileConfigs.forEach(cfg => {
             this.files[cfg.key] = null;
+            this.fileIds[cfg.key] = null;
             document.getElementById(`fname-${cfg.key}`).textContent = '';
             document.getElementById(`drop-${cfg.key}`).style.borderColor = '';
             document.getElementById(`finput-${cfg.key}`).value = '';
@@ -150,7 +185,219 @@ const Incassi = {
     },
 
     async startProcessing() {
-        // TODO: Implementare chiamata API backend (Step 6)
-        showToast('Elaborazione non ancora implementata (Step 6)', 'warning');
+        const btn = document.getElementById('btn-process');
+        btn.disabled = true;
+        btn.textContent = 'Avvio in corso...';
+
+        document.getElementById('incassi-progress').style.display = 'block';
+        document.getElementById('incassi-results').style.display = 'none';
+
+        try {
+            const body = {
+                file_incassi_id: this.fileIds.incassi,
+                file_massivo_id: this.fileIds.massivo,
+                file_conferimento_id: this.fileIds.conferimento,
+                file_piani_rientro_id: this.fileIds.piani || null,
+            };
+
+            const res = await Auth.apiRequest('/api/incassi/process', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore avvio elaborazione');
+            }
+
+            const data = await res.json();
+            this.jobId = data.job_id;
+
+            // Nascondi upload area
+            document.getElementById('uploads-section').style.display = 'none';
+            document.getElementById('action-buttons').style.display = 'none';
+
+            // Inizia polling
+            this.pollStatus();
+            this.pollTimer = setInterval(() => this.pollStatus(), 1500);
+
+        } catch (err) {
+            showToast(err.message, 'error');
+            btn.disabled = false;
+            btn.textContent = 'Avvia Elaborazione';
+            document.getElementById('incassi-progress').style.display = 'none';
+        }
+    },
+
+    async pollStatus() {
+        if (!this.jobId) return;
+
+        try {
+            const res = await Auth.apiRequest(`/api/incassi/result/${this.jobId}`);
+            if (!res.ok) return;
+
+            const data = await res.json();
+            this.updateStepper(data.phases);
+            this.updateProgress(data);
+
+            if (data.status === 'completed' || data.status === 'error') {
+                clearInterval(this.pollTimer);
+                this.pollTimer = null;
+
+                if (data.status === 'completed') {
+                    this.showResults(data);
+                    showToast('Elaborazione completata con successo', 'success');
+                } else {
+                    showToast(`Errore: ${data.message}`, 'error');
+                    document.getElementById('progress-text').textContent = `Errore: ${data.message}`;
+                    document.getElementById('progress-text').style.color = 'var(--accent-red)';
+                }
+            }
+        } catch {
+            // Ignore polling errors
+        }
+    },
+
+    updateStepper(phases) {
+        const stepEls = document.querySelectorAll('#incassi-stepper .stepper-step');
+        phases.forEach((phase, i) => {
+            if (i < stepEls.length) {
+                stepEls[i].className = 'stepper-step';
+                if (phase.status === 'completed') stepEls[i].classList.add('completed');
+                else if (phase.status === 'running') stepEls[i].classList.add('active');
+                else if (phase.status === 'error') stepEls[i].classList.add('error');
+            }
+        });
+    },
+
+    updateProgress(data) {
+        const completed = data.phases.filter(p => p.status === 'completed').length;
+        const pct = Math.round((completed / 7) * 100);
+        document.getElementById('progress-fill').style.width = `${pct}%`;
+
+        const running = data.phases.find(p => p.status === 'running');
+        if (running) {
+            document.getElementById('progress-text').textContent =
+                `Fase ${running.phase}/7: ${running.name} — ${running.message}`;
+        } else if (data.status === 'completed') {
+            document.getElementById('progress-text').textContent = 'Elaborazione completata';
+            document.getElementById('progress-fill').style.width = '100%';
+            document.getElementById('progress-fill').style.backgroundColor = 'var(--accent-green)';
+        }
+    },
+
+    showResults(data) {
+        const resultsEl = document.getElementById('incassi-results');
+        resultsEl.style.display = 'block';
+
+        resultsEl.innerHTML = `
+            <div class="card-title">Riepilogo Elaborazione</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px;">
+                <div class="stat-card">
+                    <div class="stat-label">Fatture totali</div>
+                    <div class="stat-value">${data.total_fatture}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Incassate</div>
+                    <div class="stat-value" style="color:var(--accent-green)">${data.fatture_incassate}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Anomalie</div>
+                    <div class="stat-value" style="color:${data.anomalie > 0 ? 'var(--accent-red)' : 'var(--text-primary)'}">${data.anomalie}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Piani rientro</div>
+                    <div class="stat-value">${data.piani_rientro}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Nuove righe</div>
+                    <div class="stat-value">${data.nuove_righe}</div>
+                </div>
+            </div>
+
+            ${data.message ? `<p style="color:var(--accent-amber);margin-bottom:16px;font-size:0.9rem;">${App.escapeHtml(data.message)}</p>` : ''}
+
+            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
+                <a class="btn btn-primary" href="/api/incassi/download/${data.job_id}/conferimento" target="_blank">
+                    Scarica Conferimento Aggiornato
+                </a>
+                ${data.anomalie > 0 ? `
+                    <a class="btn btn-warn" href="/api/incassi/download/${data.job_id}/anomalie" target="_blank">
+                        Scarica Report Anomalie
+                    </a>` : ''}
+                ${data.nuove_righe > 0 ? `
+                    <a class="btn btn-edit" href="/api/incassi/download/${data.job_id}/nuove_righe" target="_blank">
+                        Scarica Nuove Righe
+                    </a>` : ''}
+            </div>
+
+            <div id="anomalie-table"></div>
+
+            <div style="margin-top:20px;">
+                <button class="btn btn-cancel" id="btn-new-elaboration">Nuova Elaborazione</button>
+            </div>
+        `;
+
+        document.getElementById('btn-new-elaboration').addEventListener('click', () => {
+            App.navigate('incassi');
+        });
+
+        // Carica dettaglio anomalie
+        if (data.anomalie > 0) {
+            this.loadAnomalieTable(data.job_id);
+        }
+    },
+
+    async loadAnomalieTable(jobId) {
+        const container = document.getElementById('anomalie-table');
+        try {
+            const res = await Auth.apiRequest(`/api/incassi/result/${jobId}/anomalie`);
+            if (!res.ok) return;
+            const data = await res.json();
+
+            if (!data.anomalie.length && !data.correzioni.length) return;
+
+            let html = '';
+            if (data.anomalie.length) {
+                html += `
+                    <div class="card-title" style="margin-top:16px;">Anomalie (${data.anomalie.length})</div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Nr. Bolletta</th><th>Tipo</th><th>Dettaglio</th></tr></thead>
+                            <tbody>
+                                ${data.anomalie.map(a => `
+                                    <tr>
+                                        <td>${App.escapeHtml(a.numero_bolletta)}</td>
+                                        <td><span class="badge badge-disabled">${App.escapeHtml(a.tipo)}</span></td>
+                                        <td style="color:var(--text-muted)">${App.escapeHtml(a.dettaglio)}</td>
+                                    </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+            }
+
+            if (data.correzioni.length) {
+                html += `
+                    <div class="card-title" style="margin-top:16px;">Correzioni manuali (${data.correzioni.length})</div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>Nr. Bolletta</th><th>Tipo</th><th>Dettaglio</th></tr></thead>
+                            <tbody>
+                                ${data.correzioni.map(c => `
+                                    <tr>
+                                        <td>${App.escapeHtml(c.numero_bolletta)}</td>
+                                        <td><span class="badge" style="background:rgba(243,156,18,0.15);color:var(--accent-amber)">${App.escapeHtml(c.tipo)}</span></td>
+                                        <td style="color:var(--text-muted)">${App.escapeHtml(c.dettaglio)}</td>
+                                    </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+            }
+
+            container.innerHTML = html;
+        } catch {
+            // Ignore
+        }
     }
 };
