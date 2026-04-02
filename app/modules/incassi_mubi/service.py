@@ -163,20 +163,22 @@ def fase2_join_importo_aperto(
     df_incassi["_join_key"] = df_incassi[col_boll_incassi].astype(str).str.strip()
 
     # Prendi importo aperto dal file incassi (deduplica su numero fattura)
+    # Rinomino in "ImportoAperto_Incassi" per evitare collisione con la colonna
+    # "ImportoAperto" già presente nel massivo
     incassi_subset = df_incassi[["_join_key", col_importo_incassi]].copy()
     incassi_subset[col_importo_incassi] = incassi_subset[col_importo_incassi].apply(_normalize_amount)
     incassi_subset = incassi_subset.drop_duplicates(subset=["_join_key"], keep="first")
-    incassi_subset = incassi_subset.rename(columns={col_importo_incassi: "ImportoAperto"})
+    incassi_subset = incassi_subset.rename(columns={col_importo_incassi: "ImportoAperto_Incassi"})
 
     # LEFT JOIN: massivo come base, lookup importo aperto dagli incassi
     df_massivo = df_massivo.merge(incassi_subset, on="_join_key", how="left")
-    df_massivo["ImportoAperto"] = df_massivo["ImportoAperto"].fillna(0.0)
+    df_massivo["ImportoAperto_Incassi"] = df_massivo["ImportoAperto_Incassi"].fillna(0.0)
 
     # Aggiungi data di lavorazione (data odierna)
     df_massivo["Data Lavorazione"] = pd.Timestamp.now().normalize()
 
-    # Nuove righe: importo aperto > 20 euro (soglia conferimento)
-    df_nuove = df_massivo[df_massivo["ImportoAperto"] > 20].copy()
+    # Nuove righe: importo aperto incassi > 20 euro (soglia conferimento)
+    df_nuove = df_massivo[df_massivo["ImportoAperto_Incassi"] > 20].copy()
 
     logger.info("  Join completato: %d righe massivo, %d nuove righe da aggiungere (ImportoAperto > 20)",
                 len(df_massivo), len(df_nuove))
@@ -203,7 +205,8 @@ def fase3_piani_rientro(
     logger.info("FASE 3: Piani di rientro")
 
     df_piani = pd.read_excel(file_piani, dtype=str)
-    df_piani.columns = [c.strip() for c in df_piani.columns]
+    df_piani.columns = [c.strip().replace("\ufeff", "") for c in df_piani.columns]
+    logger.info("  Colonne piani di rientro: %s", list(df_piani.columns))
 
     col_boll_conf = _find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
     col_boll_piani = _find_column(df_piani, COL_NR_DOCUMENTO_VARIANTS)
@@ -489,7 +492,8 @@ def elabora_incassi(
 
     # Carica conferimento
     df_conferimento = pd.read_excel(file_conferimento, dtype=str)
-    df_conferimento.columns = [c.strip() for c in df_conferimento.columns]
+    df_conferimento.columns = [c.strip().replace("\ufeff", "") for c in df_conferimento.columns]
+    logger.info("  Colonne conferimento: %s", list(df_conferimento.columns))
 
     # FASE 3
     notify(3, "Verifica piani di rientro...")
