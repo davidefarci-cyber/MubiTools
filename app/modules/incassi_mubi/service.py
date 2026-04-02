@@ -1,13 +1,12 @@
 """Logica di business per il modulo Incassi Mubi.
 
-Implementa le 7 fasi di elaborazione:
+Implementa le 6 fasi di elaborazione:
 1. Conversione file Incassi (.txt -> DataFrame)
-2. Cerca.Vert Importo Aperto (join con Massivo)
+2. Cerca.Vert Importo Aperto (join Massivo con Incassi)
 3. Piani di Rientro (join e annotazione)
-4. Popola colonne Conferimento (Z, AA, AB)
-5. Colonna 'Identico' e pulizia
+4. Popola colonne Conferimento (INCASSATO, DATA PAGAMENTO, MODALITA')
+5. Calcolo Incassato (ImportoAperto_conferimento - ImportoAperto_incassi)
 6. Ordinamento e Controllo
-7. Aggiornamento Pivot
 """
 
 import logging
@@ -26,6 +25,10 @@ RED_FILL = PatternFill(start_color="FFE74C3C", end_color="FFE74C3C", fill_type="
 COL_NR_BOLLETTA_VARIANTS = [
     "nr. bolletta", "numero bolletta", "nr bolletta",
     "n. bolletta", "num bolletta", "nr.bolletta",
+    "numerofattura",
+]
+COL_NR_DOCUMENTO_VARIANTS = [
+    "nr. documento", "numero documento", "nr documento", "n. documento",
 ]
 COL_IMPORTO_APERTO_VARIANTS = [
     "importo aperto", "importoaperto", "imp. aperto", "imp aperto",
@@ -36,6 +39,7 @@ COL_DATA_PAGAMENTO_VARIANTS = [
 COL_MODALITA_PAGAMENTO_VARIANTS = [
     "modalita' di pagamento", "modalita di pagamento",
     "mod. pagamento", "mod pagamento", "modalitapagamento",
+    "metodopagamento",
 ]
 COL_DATA_SCADENZA_VARIANTS = [
     "data scadenza", "datascadenza", "data scad.", "scadenza",
@@ -122,17 +126,17 @@ def fase1_parse_incassi(file_path: Path) -> pd.DataFrame:
 def fase2_join_importo_aperto(
     df_incassi: pd.DataFrame,
     file_massivo: Path,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """JOIN tra incassi e file massivo su numero bolletta.
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """JOIN tra massivo e incassi su numero fattura.
 
-    Aggiunge colonna 'ImportoAperto' al DataFrame incassi.
-    Identifica fatture con importo aperto positivo che nel conferimento
-    erano negative (nuove righe da aggiungere).
+    Per ogni riga del massivo, cerca l'importo aperto dal file incassi.
+    Identifica fatture con importo aperto > 20 euro (nuove righe da
+    aggiungere al conferimento).
 
     Returns:
-        (df_incassi aggiornato, df_nuove_righe)
+        (df_massivo arricchito, df_nuove_righe, df_incassi originale)
     """
-    logger.info("FASE 2: Join con file massivo per ImportoAperto")
+    logger.info("FASE 2: Join massivo con file incassi per ImportoAperto")
 
     df_massivo = pd.read_excel(file_massivo, dtype=str)
     df_massivo.columns = [c.strip() for c in df_massivo.columns]
@@ -140,38 +144,38 @@ def fase2_join_importo_aperto(
     # Trova colonne chiave
     col_boll_incassi = _find_column(df_incassi, COL_NR_BOLLETTA_VARIANTS)
     col_boll_massivo = _find_column(df_massivo, COL_NR_BOLLETTA_VARIANTS)
-    col_importo_massivo = _find_column(df_massivo, COL_IMPORTO_APERTO_VARIANTS)
+    col_importo_incassi = _find_column(df_incassi, COL_IMPORTO_APERTO_VARIANTS)
 
     if not col_boll_incassi:
-        raise ValueError("Colonna 'Nr. bolletta' non trovata nel file incassi")
+        raise ValueError("Colonna 'numerofattura' non trovata nel file incassi")
     if not col_boll_massivo:
-        raise ValueError("Colonna 'Numero bolletta' non trovata nel file massivo")
+        raise ValueError("Colonna 'numerofattura' non trovata nel file massivo")
+    if not col_importo_incassi:
+        raise ValueError("Colonna 'importo aperto' non trovata nel file incassi")
 
-    # Normalizza importi nel massivo
-    if col_importo_massivo:
-        df_massivo[col_importo_massivo] = df_massivo[col_importo_massivo].apply(_normalize_amount)
-    else:
-        raise ValueError("Colonna 'Importo aperto' non trovata nel file massivo")
-
-    # Join
-    df_incassi["_join_key"] = df_incassi[col_boll_incassi].astype(str).str.strip()
+    # Prepara chiavi di join
     df_massivo["_join_key"] = df_massivo[col_boll_massivo].astype(str).str.strip()
+    df_incassi["_join_key"] = df_incassi[col_boll_incassi].astype(str).str.strip()
 
-    # Prendi solo le colonne necessarie dal massivo
-    massivo_subset = df_massivo[["_join_key", col_importo_massivo]].drop_duplicates(
-        subset=["_join_key"], keep="first"
-    )
-    massivo_subset = massivo_subset.rename(columns={col_importo_massivo: "ImportoAperto"})
+    # Prendi importo aperto dal file incassi (deduplica su numero fattura)
+    incassi_subset = df_incassi[["_join_key", col_importo_incassi]].copy()
+    incassi_subset[col_importo_incassi] = incassi_subset[col_importo_incassi].apply(_normalize_amount)
+    incassi_subset = incassi_subset.drop_duplicates(subset=["_join_key"], keep="first")
+    incassi_subset = incassi_subset.rename(columns={col_importo_incassi: "ImportoAperto"})
 
-    df_incassi = df_incassi.merge(massivo_subset, on="_join_key", how="left")
-    df_incassi["ImportoAperto"] = df_incassi["ImportoAperto"].fillna(0.0)
+    # LEFT JOIN: massivo come base, lookup importo aperto dagli incassi
+    df_massivo = df_massivo.merge(incassi_subset, on="_join_key", how="left")
+    df_massivo["ImportoAperto"] = df_massivo["ImportoAperto"].fillna(0.0)
 
-    # Nuove righe: importo aperto positivo (nel conferimento erano negative)
-    df_nuove = df_incassi[df_incassi["ImportoAperto"] > 0].copy()
+    # Aggiungi data di lavorazione (data odierna)
+    df_massivo["Data Lavorazione"] = pd.Timestamp.now().normalize()
 
-    logger.info("  Join completato: %d righe, %d nuove righe da aggiungere",
-                len(df_incassi), len(df_nuove))
-    return df_incassi, df_nuove
+    # Nuove righe: importo aperto > 20 euro (soglia conferimento)
+    df_nuove = df_massivo[df_massivo["ImportoAperto"] > 20].copy()
+
+    logger.info("  Join completato: %d righe massivo, %d nuove righe da aggiungere (ImportoAperto > 20)",
+                len(df_massivo), len(df_nuove))
+    return df_massivo, df_nuove, df_incassi
 
 
 # ─── FASE 3: Piani di Rientro ────────────────────────────────────
@@ -197,10 +201,10 @@ def fase3_piani_rientro(
     df_piani.columns = [c.strip() for c in df_piani.columns]
 
     col_boll_conf = _find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
-    col_boll_piani = _find_column(df_piani, COL_NR_BOLLETTA_VARIANTS)
+    col_boll_piani = _find_column(df_piani, COL_NR_DOCUMENTO_VARIANTS)
 
     if not col_boll_conf or not col_boll_piani:
-        logger.warning("  Colonna numero bolletta non trovata, skip piani di rientro")
+        logger.warning("  Colonna numero fattura/documento non trovata, skip piani di rientro")
         return df_conferimento, 0
 
     piani_set = set(df_piani[col_boll_piani].astype(str).str.strip())
@@ -236,34 +240,32 @@ def fase4_popola_conferimento(
     df_conferimento: pd.DataFrame,
     df_incassi: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Cerca.Vert tra incassi e conferimento su numero bolletta.
+    """Cerca.Vert tra incassi e conferimento su numero fattura.
 
     Popola:
-    - Colonna Z (INCASSATO): importo aperto dalla fattura
-    - Colonna AA (DATA PAGAMENTO): data pagamento dal file incassi
-    - Colonna AB (MODALITA' DI PAGAMENTO): metodo pagamento dal file incassi
+    - Colonna INCASSATO: importo aperto dal file incassi
+    - Colonna DATA PAGAMENTO: data pagamento dal file incassi
+    - Colonna MODALITA' DI PAGAMENTO: metodo pagamento dal file incassi
     """
-    logger.info("FASE 4: Popola colonne Conferimento (Z, AA, AB)")
+    logger.info("FASE 4: Popola colonne Conferimento (INCASSATO, DATA PAGAMENTO, MODALITA')")
 
     col_boll_conf = _find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
     col_boll_inc = _find_column(df_incassi, COL_NR_BOLLETTA_VARIANTS)
 
     if not col_boll_conf or not col_boll_inc:
-        raise ValueError("Colonna numero bolletta non trovata")
+        raise ValueError("Colonna numero fattura non trovata")
 
     # Prepara lookup da incassi
     col_importo = _find_column(df_incassi, COL_IMPORTO_APERTO_VARIANTS)
     col_data_pag = _find_column(df_incassi, COL_DATA_PAGAMENTO_VARIANTS)
     col_mod_pag = _find_column(df_incassi, COL_MODALITA_PAGAMENTO_VARIANTS)
 
-    # Crea dizionario lookup
+    # Crea dizionario lookup dal file incassi
     lookup: dict[str, dict] = {}
     for _, row in df_incassi.iterrows():
         key = str(row[col_boll_inc]).strip()
         entry: dict = {}
-        if col_importo and pd.notna(row.get("ImportoAperto")):
-            entry["importo"] = row["ImportoAperto"]
-        elif col_importo and pd.notna(row.get(col_importo)):
+        if col_importo and pd.notna(row.get(col_importo)):
             entry["importo"] = _normalize_amount(row[col_importo])
         if col_data_pag and pd.notna(row.get(col_data_pag)):
             entry["data_pag"] = row[col_data_pag]
@@ -272,21 +274,12 @@ def fase4_popola_conferimento(
         if entry:
             lookup[key] = entry
 
-    # Trova colonne Z, AA, AB nel conferimento (per posizione o nome)
-    # Prova prima per nome
+    # Trova colonne target nel conferimento per nome
     col_z = _find_column(df_conferimento, ["incassato", "importo incassato"])
     col_aa = _find_column(df_conferimento, COL_DATA_PAGAMENTO_VARIANTS)
     col_ab = _find_column(df_conferimento, COL_MODALITA_PAGAMENTO_VARIANTS)
 
-    # Fallback: usa posizione colonne (Z=25, AA=26, AB=27)
-    cols = list(df_conferimento.columns)
-    if not col_z:
-        col_z = cols[25] if len(cols) > 25 else None
-    if not col_aa:
-        col_aa = cols[26] if len(cols) > 26 else None
-    if not col_ab:
-        col_ab = cols[27] if len(cols) > 27 else None
-
+    # Se non trovate, crearle
     if not col_z:
         col_z = "INCASSATO"
         df_conferimento[col_z] = ""
@@ -314,39 +307,36 @@ def fase4_popola_conferimento(
     return df_conferimento
 
 
-# ─── FASE 5: Colonna Identico e pulizia ──────────────────────────
+# ─── FASE 5: Calcolo Incassato ───────────────────────────────────
 
-def fase5_identico(df_conferimento: pd.DataFrame) -> pd.DataFrame:
-    """Confronto tra INCASSATO (col Z) e ImportoAffidato (col Q).
+def fase5_calcolo_incassato(df_conferimento: pd.DataFrame) -> pd.DataFrame:
+    """Calcola il valore effettivo di INCASSATO.
 
-    Se identici -> fattura NON PAGATA -> azzera INCASSATO.
+    INCASSATO = ImportoAperto(conferimento, col Q) - ImportoAperto(incassi, attualmente in col Z).
+    Se uguali → 0 (nessun pagamento). Se diversi → differenza = importo incassato.
     """
-    logger.info("FASE 5: Colonna Identico e pulizia")
+    logger.info("FASE 5: Calcolo Incassato (ImportoAperto_conf - ImportoAperto_incassi)")
 
-    cols = list(df_conferimento.columns)
-
-    # Colonna Q (posizione 16) = ImportoAffidato
-    col_q = cols[16] if len(cols) > 16 else None
-    # Colonna Z = INCASSATO
+    # Colonna Q = "importo aperto" nel conferimento (importo aperto al tempo t-1)
+    col_q = _find_column(df_conferimento, COL_IMPORTO_APERTO_VARIANTS)
+    # Colonna Z = "INCASSATO" (attualmente contiene l'importo aperto dal file incassi)
     col_z = _find_column(df_conferimento, ["incassato", "importo incassato"])
-    if not col_z:
-        col_z = cols[25] if len(cols) > 25 else None
 
     if not col_q or not col_z:
-        logger.warning("  Colonne Q o Z non trovate, skip fase 5")
+        logger.warning("  Colonne 'importo aperto' o 'INCASSATO' non trovate, skip fase 5")
         return df_conferimento
 
-    azzerati = 0
+    calcolati = 0
     for idx, row in df_conferimento.iterrows():
         val_z = _normalize_amount(row.get(col_z, 0))
         val_q = _normalize_amount(row.get(col_q, 0))
 
-        if val_z != 0 and abs(val_z - val_q) < 0.01:
-            # Importo identico = fattura non pagata
-            df_conferimento.at[idx, col_z] = 0
-            azzerati += 1
+        if val_z != 0:
+            # Incassato effettivo = importo aperto precedente - importo aperto attuale
+            df_conferimento.at[idx, col_z] = round(val_q - val_z, 2)
+            calcolati += 1
 
-    logger.info("  Fatture non pagate (importo identico) azzerate: %d", azzerati)
+    logger.info("  Incassato calcolato per %d righe", calcolati)
     return df_conferimento
 
 
@@ -354,36 +344,25 @@ def fase5_identico(df_conferimento: pd.DataFrame) -> pd.DataFrame:
 
 def fase6_ordinamento_controllo(
     df_conferimento: pd.DataFrame,
-) -> tuple[pd.DataFrame, list[dict], list[dict]]:
-    """Ordina INCASSATO e genera report anomalie e correzioni.
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Ordina INCASSATO e genera report anomalie.
 
     Returns:
-        (df_conferimento_ordinato, anomalie, correzioni)
+        (df_conferimento_ordinato, anomalie)
     """
     logger.info("FASE 6: Ordinamento e controllo")
 
     col_z = _find_column(df_conferimento, ["incassato", "importo incassato"])
-    cols = list(df_conferimento.columns)
-    if not col_z:
-        col_z = cols[25] if len(cols) > 25 else None
-
     col_aa = _find_column(df_conferimento, COL_DATA_PAGAMENTO_VARIANTS)
-    if not col_aa:
-        col_aa = cols[26] if len(cols) > 26 else None
-
     col_ab = _find_column(df_conferimento, COL_MODALITA_PAGAMENTO_VARIANTS)
-    if not col_ab:
-        col_ab = cols[27] if len(cols) > 27 else None
-
     col_boll = _find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
 
-    # Converti colonna Z in numerico per ordinamento
+    # Converti colonna INCASSATO in numerico per ordinamento
     if col_z:
         df_conferimento[col_z] = df_conferimento[col_z].apply(_normalize_amount)
         df_conferimento = df_conferimento.sort_values(by=col_z, ascending=True)
 
     anomalie: list[dict] = []
-    correzioni: list[dict] = []
 
     for idx, row in df_conferimento.iterrows():
         val_z = _normalize_amount(row.get(col_z, 0)) if col_z else 0
@@ -406,48 +385,8 @@ def fase6_ordinamento_controllo(
                     "dettaglio": f"Mancante: {', '.join(missing)}",
                 })
 
-            # Fatture pagate (INCASSATO <= 0)
-            if val_z <= 0:
-                correzioni.append({
-                    "numero_bolletta": boll,
-                    "tipo": "fattura_pagata",
-                    "dettaglio": f"INCASSATO = {val_z} (fattura pagata)",
-                })
-
-    logger.info("  Anomalie: %d, Correzioni: %d", len(anomalie), len(correzioni))
-    return df_conferimento, anomalie, correzioni
-
-
-# ─── FASE 7: Aggiornamento Pivot ─────────────────────────────────
-
-def fase7_aggiorna_pivot(file_path: Path) -> str:
-    """Verifica se il file contiene fogli pivot e notifica.
-
-    Openpyxl non supporta l'aggiornamento automatico delle pivot table,
-    quindi notifichiamo l'utente.
-    """
-    logger.info("FASE 7: Verifica pivot table")
-
-    wb = load_workbook(file_path, data_only=False)
-    pivot_sheets: list[str] = []
-
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        if hasattr(ws, "_pivots") and ws._pivots:
-            pivot_sheets.append(sheet_name)
-
-    wb.close()
-
-    if pivot_sheets:
-        msg = (
-            f"Pivot table trovate nei fogli: {', '.join(pivot_sheets)}. "
-            "Aprire il file in Excel e aggiornare manualmente le pivot (tasto destro > Aggiorna)."
-        )
-    else:
-        msg = "Nessuna pivot table rilevata nel file."
-
-    logger.info("  %s", msg)
-    return msg
+    logger.info("  Anomalie: %d", len(anomalie))
+    return df_conferimento, anomalie
 
 
 # ─── Salvataggio output ──────────────────────────────────────────
@@ -513,7 +452,7 @@ def elabora_incassi(
     output_dir: Path,
     progress_callback: Callable[[int, str], None] | None = None,
 ) -> dict:
-    """Esegue le 7 fasi di elaborazione e restituisce i risultati.
+    """Esegue le 6 fasi di elaborazione e restituisce i risultati.
 
     Args:
         file_incassi: Path al file .txt esportato da Mubi
@@ -539,9 +478,9 @@ def elabora_incassi(
     notify(1, f"Completato: {len(df_incassi)} righe")
 
     # FASE 2
-    notify(2, "Join con file massivo per ImportoAperto...")
-    df_incassi, df_nuove_righe = fase2_join_importo_aperto(df_incassi, file_massivo)
-    notify(2, f"Completato: {len(df_nuove_righe)} nuove righe")
+    notify(2, "Join massivo con incassi per ImportoAperto...")
+    df_massivo, df_nuove_righe, df_incassi = fase2_join_importo_aperto(df_incassi, file_massivo)
+    notify(2, f"Completato: {len(df_nuove_righe)} nuove righe (ImportoAperto > 20)")
 
     # Carica conferimento
     df_conferimento = pd.read_excel(file_conferimento, dtype=str)
@@ -560,24 +499,19 @@ def elabora_incassi(
     notify(4, "Completato")
 
     # FASE 5
-    notify(5, "Confronto Identico e pulizia...")
-    df_conferimento = fase5_identico(df_conferimento)
+    notify(5, "Calcolo Incassato...")
+    df_conferimento = fase5_calcolo_incassato(df_conferimento)
     notify(5, "Completato")
 
     # FASE 6
     notify(6, "Ordinamento e controllo...")
-    df_conferimento, anomalie, correzioni = fase6_ordinamento_controllo(df_conferimento)
-    notify(6, f"Completato: {len(anomalie)} anomalie, {len(correzioni)} correzioni")
+    df_conferimento, anomalie = fase6_ordinamento_controllo(df_conferimento)
+    notify(6, f"Completato: {len(anomalie)} anomalie")
 
-    # FASE 7
-    notify(7, "Verifica pivot table...")
-    # Salva prima il file per poi verificare le pivot
+    # Salva output
     output_conferimento = output_dir / "conferimento_aggiornato.xlsx"
     salva_conferimento(df_conferimento, anomalie, output_conferimento, file_conferimento)
-    pivot_msg = fase7_aggiorna_pivot(output_conferimento)
-    notify(7, pivot_msg)
 
-    # Salva report
     output_anomalie = output_dir / "report_anomalie.xlsx"
     salva_report_anomalie(anomalie, output_anomalie)
 
@@ -586,15 +520,12 @@ def elabora_incassi(
 
     # Calcola statistiche
     col_z = _find_column(df_conferimento, ["incassato", "importo incassato"])
-    if not col_z:
-        cols = list(df_conferimento.columns)
-        col_z = cols[25] if len(cols) > 25 else None
 
     fatture_incassate = 0
     if col_z:
         for _, row in df_conferimento.iterrows():
             val = _normalize_amount(row.get(col_z, 0))
-            if val < 0:
+            if val > 0:
                 fatture_incassate += 1
 
     results = {
@@ -603,9 +534,7 @@ def elabora_incassi(
         "anomalie": len(anomalie),
         "piani_rientro": piani_count,
         "nuove_righe": len(df_nuove_righe),
-        "pivot_message": pivot_msg,
         "anomalie_detail": anomalie[:100],  # Max 100 per la UI
-        "correzioni_detail": correzioni[:100],
         "files": {
             "conferimento": str(output_conferimento),
             "anomalie": str(output_anomalie) if anomalie else None,
@@ -614,6 +543,6 @@ def elabora_incassi(
     }
 
     logger.info("Elaborazione completata: %s", {
-        k: v for k, v in results.items() if k not in ("anomalie_detail", "correzioni_detail", "files")
+        k: v for k, v in results.items() if k not in ("anomalie_detail", "files")
     })
     return results

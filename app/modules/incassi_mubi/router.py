@@ -144,11 +144,10 @@ def _run_elaborazione(job_id: str, request: ProcessRequest, user_id: int) -> Non
         job["anomalie"] = results["anomalie"]
         job["piani_rientro"] = results["piani_rientro"]
         job["nuove_righe"] = results["nuove_righe"]
-        job["message"] = results.get("pivot_message", "Elaborazione completata")
+        job["message"] = "Elaborazione completata"
         job["download_ready"] = True
         job["output_dir"] = str(output_dir)
         job["anomalie_detail"] = results.get("anomalie_detail", [])
-        job["correzioni_detail"] = results.get("correzioni_detail", [])
         job["files"] = results.get("files", {})
 
         logger.info("Job %s completato: %d fatture", job_id, results["total_fatture"])
@@ -180,9 +179,8 @@ def start_processing(
         "Cerca.Vert Importo Aperto",
         "Piani di Rientro",
         "Popola Conferimento",
-        "Confronto Identico",
+        "Calcolo Incassato",
         "Ordinamento e Controllo",
-        "Aggiornamento Pivot",
     ]
 
     _jobs[job_id] = {
@@ -265,7 +263,6 @@ def get_anomalie(
     job = _jobs[job_id]
     return {
         "anomalie": job.get("anomalie_detail", []),
-        "correzioni": job.get("correzioni_detail", []),
     }
 
 

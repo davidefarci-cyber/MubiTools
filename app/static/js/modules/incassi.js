@@ -31,9 +31,8 @@ const Incassi = {
         '2. Importo Aperto',
         '3. Piani Rientro',
         '4. Conferimento',
-        '5. Identico',
+        '5. Calcolo Incassato',
         '6. Controllo',
-        '7. Pivot',
     ],
 
     render(container) {
@@ -273,13 +272,13 @@ const Incassi = {
 
     updateProgress(data) {
         const completed = data.phases.filter(p => p.status === 'completed').length;
-        const pct = Math.round((completed / 7) * 100);
+        const pct = Math.round((completed / 6) * 100);
         document.getElementById('progress-fill').style.width = `${pct}%`;
 
         const running = data.phases.find(p => p.status === 'running');
         if (running) {
             document.getElementById('progress-text').textContent =
-                `Fase ${running.phase}/7: ${running.name} — ${running.message}`;
+                `Fase ${running.phase}/6: ${running.name} — ${running.message}`;
         } else if (data.status === 'completed') {
             document.getElementById('progress-text').textContent = 'Elaborazione completata';
             document.getElementById('progress-fill').style.width = '100%';
@@ -356,44 +355,23 @@ const Incassi = {
             if (!res.ok) return;
             const data = await res.json();
 
-            if (!data.anomalie.length && !data.correzioni.length) return;
+            if (!data.anomalie.length) return;
 
-            let html = '';
-            if (data.anomalie.length) {
-                html += `
-                    <div class="card-title" style="margin-top:16px;">Anomalie (${data.anomalie.length})</div>
-                    <div class="table-container">
-                        <table>
-                            <thead><tr><th>Nr. Bolletta</th><th>Tipo</th><th>Dettaglio</th></tr></thead>
-                            <tbody>
-                                ${data.anomalie.map(a => `
-                                    <tr>
-                                        <td>${App.escapeHtml(a.numero_bolletta)}</td>
-                                        <td><span class="badge badge-disabled">${App.escapeHtml(a.tipo)}</span></td>
-                                        <td style="color:var(--text-muted)">${App.escapeHtml(a.dettaglio)}</td>
-                                    </tr>`).join('')}
-                            </tbody>
-                        </table>
-                    </div>`;
-            }
-
-            if (data.correzioni.length) {
-                html += `
-                    <div class="card-title" style="margin-top:16px;">Correzioni manuali (${data.correzioni.length})</div>
-                    <div class="table-container">
-                        <table>
-                            <thead><tr><th>Nr. Bolletta</th><th>Tipo</th><th>Dettaglio</th></tr></thead>
-                            <tbody>
-                                ${data.correzioni.map(c => `
-                                    <tr>
-                                        <td>${App.escapeHtml(c.numero_bolletta)}</td>
-                                        <td><span class="badge" style="background:rgba(243,156,18,0.15);color:var(--accent-amber)">${App.escapeHtml(c.tipo)}</span></td>
-                                        <td style="color:var(--text-muted)">${App.escapeHtml(c.dettaglio)}</td>
-                                    </tr>`).join('')}
-                            </tbody>
-                        </table>
-                    </div>`;
-            }
+            const html = `
+                <div class="card-title" style="margin-top:16px;">Anomalie (${data.anomalie.length})</div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Nr. Fattura</th><th>Tipo</th><th>Dettaglio</th></tr></thead>
+                        <tbody>
+                            ${data.anomalie.map(a => `
+                                <tr>
+                                    <td>${App.escapeHtml(a.numero_bolletta)}</td>
+                                    <td><span class="badge badge-disabled">${App.escapeHtml(a.tipo)}</span></td>
+                                    <td style="color:var(--text-muted)">${App.escapeHtml(a.dettaglio)}</td>
+                                </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>`;
 
             container.innerHTML = html;
         } catch {
