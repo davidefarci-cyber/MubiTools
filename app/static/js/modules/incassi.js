@@ -251,6 +251,8 @@ const Incassi = {
                     showToast(`Errore: ${data.message}`, 'error');
                     document.getElementById('progress-text').textContent = `Errore: ${data.message}`;
                     document.getElementById('progress-text').style.color = 'var(--accent-red)';
+                    // Mostra pannello debug in caso di errore
+                    this.showErrorDebug(data);
                 }
             }
         } catch {
@@ -332,6 +334,7 @@ const Incassi = {
             </div>
 
             <div id="anomalie-table"></div>
+            <div id="debug-panel"></div>
 
             <div style="margin-top:20px;">
                 <button class="btn btn-cancel" id="btn-new-elaboration">Nuova Elaborazione</button>
@@ -346,6 +349,8 @@ const Incassi = {
         if (data.anomalie > 0) {
             this.loadAnomalieTable(data.job_id);
         }
+        // Carica pannello debug
+        this.loadDebugPanel(data.job_id);
     },
 
     async loadAnomalieTable(jobId) {
@@ -377,5 +382,97 @@ const Incassi = {
         } catch {
             // Ignore
         }
+    },
+
+    showErrorDebug(data) {
+        const resultsEl = document.getElementById('incassi-results');
+        resultsEl.style.display = 'block';
+        resultsEl.innerHTML = `
+            <div style="background:rgba(231,76,60,0.1);border:1px solid var(--accent-red);border-radius:8px;padding:16px;margin-bottom:16px;">
+                <div style="font-weight:600;color:var(--accent-red);margin-bottom:8px;">Errore nell'elaborazione</div>
+                <pre style="white-space:pre-wrap;word-break:break-word;font-size:0.8rem;color:var(--text-muted);margin:0;">${App.escapeHtml(data.message || 'Errore sconosciuto')}</pre>
+            </div>
+            <div id="debug-panel"></div>
+            <div style="margin-top:20px;">
+                <button class="btn btn-cancel" id="btn-new-elaboration">Nuova Elaborazione</button>
+            </div>
+        `;
+        document.getElementById('btn-new-elaboration').addEventListener('click', () => {
+            App.navigate('incassi');
+        });
+        this.loadDebugPanel(data.job_id);
+    },
+
+    async loadDebugPanel(jobId) {
+        const container = document.getElementById('debug-panel');
+        if (!container) return;
+        try {
+            const res = await Auth.apiRequest(`/api/incassi/result/${jobId}/debug`);
+            if (!res.ok) {
+                container.innerHTML = '<p style="color:var(--text-muted)">Debug info non disponibile</p>';
+                return;
+            }
+            const data = await res.json();
+            container.innerHTML = this.renderDebugHtml(data);
+        } catch {
+            container.innerHTML = '<p style="color:var(--text-muted)">Impossibile caricare debug info</p>';
+        }
+    },
+
+    renderDebugHtml(data) {
+        const debugInfo = data.debug_info || [];
+        if (!debugInfo.length && !data.error_message) {
+            return '<p style="color:var(--text-muted)">Nessuna info debug disponibile</p>';
+        }
+
+        let html = `
+            <details style="margin-top:16px;" open>
+                <summary style="cursor:pointer;font-weight:600;color:var(--accent-amber);margin-bottom:12px;font-size:0.95rem;">
+                    Debug — Dettagli file e colonne
+                </summary>
+                <div style="background:var(--bg-secondary);border-radius:8px;padding:16px;font-family:monospace;font-size:0.8rem;">`;
+
+        for (const info of debugInfo) {
+            const matchedKeys = Object.keys(info.columns_matched || {});
+            const missingKeys = Object.keys(info.columns_missing || {});
+            const hasMissing = missingKeys.length > 0;
+            const borderColor = hasMissing ? 'var(--accent-red)' : 'var(--accent-green)';
+
+            html += `
+                <div style="border-left:3px solid ${borderColor};padding:8px 12px;margin-bottom:12px;">
+                    <div style="font-weight:600;color:var(--text-primary);margin-bottom:4px;">
+                        ${App.escapeHtml(info.file)}
+                    </div>
+                    <div style="color:var(--text-muted);margin-bottom:4px;">
+                        Foglio usato: <strong>${App.escapeHtml(info.sheet_used || '—')}</strong>
+                        &nbsp;|&nbsp; Fogli disponibili: ${(info.sheets_available || []).map(s => App.escapeHtml(s)).join(', ')}
+                    </div>`;
+
+            if (matchedKeys.length > 0) {
+                html += `<div style="color:var(--accent-green);margin-bottom:2px;">Colonne trovate: ${
+                    matchedKeys.map(k => `${App.escapeHtml(k)} → "${App.escapeHtml(info.columns_matched[k])}"`).join(', ')
+                }</div>`;
+            }
+
+            if (hasMissing) {
+                html += `<div style="color:var(--accent-red);margin-bottom:2px;">Colonne MANCANTI: ${
+                    missingKeys.map(k => `<strong>${App.escapeHtml(k)}</strong>`).join(', ')
+                }</div>`;
+            }
+
+            html += `
+                    <details style="margin-top:4px;">
+                        <summary style="cursor:pointer;color:var(--text-muted);font-size:0.75rem;">
+                            Tutte le colonne nel foglio (${(info.columns || []).length})
+                        </summary>
+                        <div style="margin-top:4px;color:var(--text-muted);word-break:break-all;">
+                            ${(info.columns || []).map(c => App.escapeHtml(c)).join(' | ')}
+                        </div>
+                    </details>
+                </div>`;
+        }
+
+        html += '</div></details>';
+        return html;
     }
 };

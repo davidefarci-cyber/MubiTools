@@ -55,6 +55,84 @@ def _find_column(df: pd.DataFrame, variants: list[str]) -> str | None:
     return None
 
 
+def _read_excel_smart(
+    file_path: Path,
+    required_variants: list[list[str]],
+    label: str = "file",
+) -> tuple[pd.DataFrame, dict]:
+    """Carica un file Excel trovando automaticamente il foglio giusto.
+
+    Prova il primo foglio; se mancano colonne attese, prova gli altri.
+    Restituisce (DataFrame, debug_info).
+    """
+    xl = pd.ExcelFile(file_path)
+    all_sheets = xl.sheet_names
+    debug = {"file": label, "sheets_available": all_sheets, "sheet_used": None, "columns": [], "columns_matched": {}, "columns_missing": {}}
+
+    best_df = None
+    best_sheet = None
+    best_found = -1
+
+    for sheet in all_sheets:
+        df = pd.read_excel(xl, sheet_name=sheet, dtype=str)
+        df.columns = [c.strip().replace("\ufeff", "") for c in df.columns]
+
+        found_count = 0
+        for variants in required_variants:
+            if _find_column(df, variants):
+                found_count += 1
+
+        if found_count > best_found:
+            best_found = found_count
+            best_df = df
+            best_sheet = sheet
+
+        # Se tutte le colonne trovate, usiamo questo foglio
+        if found_count == len(required_variants):
+            break
+
+    xl.close()
+
+    debug["sheet_used"] = best_sheet
+    debug["columns"] = list(best_df.columns) if best_df is not None else []
+
+    # Report colonne trovate/mancanti
+    for variants in required_variants:
+        col = _find_column(best_df, variants) if best_df is not None else None
+        key = variants[0]
+        if col:
+            debug["columns_matched"][key] = col
+        else:
+            debug["columns_missing"][key] = variants
+
+    logger.info("  [%s] Fogli: %s | Foglio usato: '%s' | Colonne: %s",
+                label, all_sheets, best_sheet, debug["columns"])
+
+    if debug["columns_missing"]:
+        logger.warning("  [%s] COLONNE MANCANTI: %s", label, debug["columns_missing"])
+
+    return best_df, debug
+
+
+def _validate_all_columns(debug_infos: list[dict]) -> list[dict]:
+    """Valida che tutte le colonne richieste siano state trovate.
+
+    Restituisce lista di errori (vuota = tutto ok).
+    """
+    errors = []
+    for info in debug_infos:
+        for col_label, variants in info.get("columns_missing", {}).items():
+            errors.append({
+                "file": info["file"],
+                "sheet": info["sheet_used"],
+                "sheets_available": info["sheets_available"],
+                "colonna_attesa": col_label,
+                "varianti_cercate": variants,
+                "colonne_trovate": info["columns"],
+            })
+    return errors
+
+
 def _normalize_amount(val: object) -> float:
     """Converte un valore in float, gestendo virgole e stringhe."""
     if pd.isna(val):
@@ -129,7 +207,7 @@ def fase1_parse_incassi(file_path: Path) -> pd.DataFrame:
 def fase2_join_importo_aperto(
     df_incassi: pd.DataFrame,
     file_massivo: Path,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
     """JOIN tra massivo e incassi su numero fattura.
 
     Per ogni riga del massivo, cerca l'importo aperto dal file incassi.
@@ -141,10 +219,11 @@ def fase2_join_importo_aperto(
     """
     logger.info("FASE 2: Join massivo con file incassi per ImportoAperto")
 
-    df_massivo = pd.read_excel(file_massivo, dtype=str)
-    df_massivo.columns = [c.strip().replace("\ufeff", "") for c in df_massivo.columns]
-
-    logger.info("  Colonne trovate nel file massivo: %s", list(df_massivo.columns))
+    df_massivo, debug_massivo = _read_excel_smart(
+        file_massivo,
+        required_variants=[COL_NR_BOLLETTA_VARIANTS],
+        label="massivo",
+    )
 
     # Trova colonne chiave
     col_boll_incassi = _find_column(df_incassi, COL_NR_BOLLETTA_VARIANTS)
@@ -182,7 +261,7 @@ def fase2_join_importo_aperto(
 
     logger.info("  Join completato: %d righe massivo, %d nuove righe da aggiungere (ImportoAperto > 20)",
                 len(df_massivo), len(df_nuove))
-    return df_massivo, df_nuove, df_incassi
+    return df_massivo, df_nuove, df_incassi, debug_massivo
 
 
 # ─── FASE 3: Piani di Rientro ────────────────────────────────────
@@ -190,30 +269,32 @@ def fase2_join_importo_aperto(
 def fase3_piani_rientro(
     df_conferimento: pd.DataFrame,
     file_piani: Path | None,
-) -> tuple[pd.DataFrame, int]:
+) -> tuple[pd.DataFrame, int, dict | None]:
     """JOIN tra piani di rientro e conferimento.
 
     Per ogni match: aggiunge 'PIANO DI RIENTRO' nella colonna NOTE.
 
     Returns:
-        (df_conferimento aggiornato, conteggio_piani)
+        (df_conferimento aggiornato, conteggio_piani, debug_info_piani)
     """
     if file_piani is None:
         logger.info("FASE 3: Nessun file piani di rientro, skip")
-        return df_conferimento, 0
+        return df_conferimento, 0, None
 
     logger.info("FASE 3: Piani di rientro")
 
-    df_piani = pd.read_excel(file_piani, dtype=str)
-    df_piani.columns = [c.strip().replace("\ufeff", "") for c in df_piani.columns]
-    logger.info("  Colonne piani di rientro: %s", list(df_piani.columns))
+    df_piani, debug_piani = _read_excel_smart(
+        file_piani,
+        required_variants=[COL_NR_DOCUMENTO_VARIANTS],
+        label="piani_rientro",
+    )
 
     col_boll_conf = _find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
     col_boll_piani = _find_column(df_piani, COL_NR_DOCUMENTO_VARIANTS)
 
     if not col_boll_conf or not col_boll_piani:
         logger.warning("  Colonna numero fattura/documento non trovata, skip piani di rientro")
-        return df_conferimento, 0
+        return df_conferimento, 0, debug_piani
 
     piani_set = set(df_piani[col_boll_piani].astype(str).str.strip())
 
@@ -239,7 +320,7 @@ def fase3_piani_rientro(
                 count += 1
 
     logger.info("  Piani di rientro trovati: %d", count)
-    return df_conferimento, count
+    return df_conferimento, count, debug_piani
 
 
 # ─── FASE 4: Popola colonne Conferimento ─────────────────────────
@@ -480,26 +561,73 @@ def elabora_incassi(
         if progress_callback:
             progress_callback(phase, msg)
 
+    debug_infos: list[dict] = []
+
     # FASE 1
     notify(1, "Parsing file incassi...")
     df_incassi = fase1_parse_incassi(file_incassi)
+    debug_incassi = {
+        "file": "incassi",
+        "sheets_available": ["—"],
+        "sheet_used": "—",
+        "columns": list(df_incassi.columns),
+        "columns_matched": {},
+        "columns_missing": {},
+    }
+    # Verifica colonne attese nel file incassi
+    for label, variants in [
+        ("numerofattura", COL_NR_BOLLETTA_VARIANTS),
+        ("importoaperto", COL_IMPORTO_APERTO_VARIANTS),
+        ("datapagamento", COL_DATA_PAGAMENTO_VARIANTS),
+        ("metodopagamento", COL_MODALITA_PAGAMENTO_VARIANTS),
+    ]:
+        col = _find_column(df_incassi, variants)
+        if col:
+            debug_incassi["columns_matched"][label] = col
+        else:
+            debug_incassi["columns_missing"][label] = variants
+    debug_infos.append(debug_incassi)
     notify(1, f"Completato: {len(df_incassi)} righe")
 
     # FASE 2
     notify(2, "Join massivo con incassi per ImportoAperto...")
-    df_massivo, df_nuove_righe, df_incassi = fase2_join_importo_aperto(df_incassi, file_massivo)
+    df_massivo, df_nuove_righe, df_incassi, debug_massivo = fase2_join_importo_aperto(df_incassi, file_massivo)
+    debug_infos.append(debug_massivo)
     notify(2, f"Completato: {len(df_nuove_righe)} nuove righe (ImportoAperto > 20)")
 
-    # Carica conferimento
-    df_conferimento = pd.read_excel(file_conferimento, dtype=str)
-    df_conferimento.columns = [c.strip().replace("\ufeff", "") for c in df_conferimento.columns]
-    logger.info("  Colonne conferimento: %s", list(df_conferimento.columns))
+    # Carica conferimento con smart reader
+    df_conferimento, debug_conf = _read_excel_smart(
+        file_conferimento,
+        required_variants=[
+            COL_NR_BOLLETTA_VARIANTS,
+            COL_IMPORTO_APERTO_VARIANTS,
+            ["incassato", "importo incassato"],
+        ],
+        label="conferimento",
+    )
+    debug_infos.append(debug_conf)
+
+    # Validazione colonne — errore anticipato con dettagli
+    validation_errors = _validate_all_columns(debug_infos)
+    if validation_errors:
+        error_lines = []
+        for err in validation_errors:
+            error_lines.append(
+                f"[{err['file']}] Colonna '{err['colonna_attesa']}' non trovata. "
+                f"Foglio usato: '{err['sheet']}' (fogli disponibili: {err['sheets_available']}). "
+                f"Colonne nel foglio: {err['colonne_trovate'][:10]}..."
+            )
+        error_msg = "Validazione colonne fallita:\n" + "\n".join(error_lines)
+        logger.error(error_msg)
+        raise ValueError(error_msg)
 
     # FASE 3
     notify(3, "Verifica piani di rientro...")
-    df_conferimento, piani_count = fase3_piani_rientro(
+    df_conferimento, piani_count, debug_piani = fase3_piani_rientro(
         df_conferimento, file_piani
     )
+    if debug_piani:
+        debug_infos.append(debug_piani)
     notify(3, f"Completato: {piani_count} piani trovati")
 
     # FASE 4
@@ -544,6 +672,7 @@ def elabora_incassi(
         "piani_rientro": piani_count,
         "nuove_righe": len(df_nuove_righe),
         "anomalie_detail": anomalie[:100],  # Max 100 per la UI
+        "debug_info": debug_infos,
         "files": {
             "conferimento": str(output_conferimento),
             "anomalie": str(output_anomalie) if anomalie else None,
@@ -552,6 +681,6 @@ def elabora_incassi(
     }
 
     logger.info("Elaborazione completata: %s", {
-        k: v for k, v in results.items() if k not in ("anomalie_detail", "files")
+        k: v for k, v in results.items() if k not in ("anomalie_detail", "debug_info", "files")
     })
     return results
