@@ -288,6 +288,26 @@ const Incassi = {
         }
     },
 
+    async downloadFile(jobId, fileType) {
+        try {
+            const res = await fetch(`/api/incassi/download/${jobId}/${fileType}`, {
+                headers: Auth.authHeaders()
+            });
+            if (!res.ok) throw new Error('Download fallito');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            App.showToast('Errore durante il download', 'error');
+        }
+    },
+
     showResults(data) {
         const resultsEl = document.getElementById('incassi-results');
         resultsEl.style.display = 'block';
@@ -320,17 +340,17 @@ const Incassi = {
             ${data.message ? `<p style="color:var(--accent-amber);margin-bottom:16px;font-size:0.9rem;">${App.escapeHtml(data.message)}</p>` : ''}
 
             <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
-                <a class="btn btn-primary" href="/api/incassi/download/${data.job_id}/conferimento" target="_blank">
+                <button class="btn btn-primary" onclick="Incassi.downloadFile('${data.job_id}', 'conferimento')">
                     Scarica Conferimento Aggiornato
-                </a>
+                </button>
                 ${data.anomalie > 0 ? `
-                    <a class="btn btn-warn" href="/api/incassi/download/${data.job_id}/anomalie" target="_blank">
+                    <button class="btn btn-warn" onclick="Incassi.downloadFile('${data.job_id}', 'anomalie')">
                         Scarica Report Anomalie
-                    </a>` : ''}
+                    </button>` : ''}
                 ${data.nuove_righe > 0 ? `
-                    <a class="btn btn-edit" href="/api/incassi/download/${data.job_id}/nuove_righe" target="_blank">
+                    <button class="btn btn-edit" onclick="Incassi.downloadFile('${data.job_id}', 'nuove_righe')">
                         Scarica Nuove Righe
-                    </a>` : ''}
+                    </button>` : ''}
             </div>
 
             <div id="anomalie-table"></div>
