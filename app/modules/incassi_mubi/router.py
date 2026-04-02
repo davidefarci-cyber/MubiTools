@@ -148,6 +148,7 @@ def _run_elaborazione(job_id: str, request: ProcessRequest, user_id: int) -> Non
         job["download_ready"] = True
         job["output_dir"] = str(output_dir)
         job["anomalie_detail"] = results.get("anomalie_detail", [])
+        job["debug_info"] = results.get("debug_info", [])
         job["files"] = results.get("files", {})
 
         logger.info("Job %s completato: %d fatture", job_id, results["total_fatture"])
@@ -263,6 +264,25 @@ def get_anomalie(
     job = _jobs[job_id]
     return {
         "anomalie": job.get("anomalie_detail", []),
+    }
+
+
+@router.get("/result/{job_id}/debug")
+def get_debug_info(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Info debug per un job (fogli, colonne trovate/mancanti)."""
+    if job_id not in _jobs:
+        raise HTTPException(status_code=404, detail="Job non trovato")
+    job = _jobs[job_id]
+    return {
+        "debug_info": job.get("debug_info", []),
+        "error_message": job.get("message", "") if job.get("status") == "error" else None,
+        "phases": [
+            {"phase": p["phase"], "name": p["name"], "status": p["status"], "message": p["message"]}
+            for p in job.get("phases", [])
+        ],
     }
 
 
