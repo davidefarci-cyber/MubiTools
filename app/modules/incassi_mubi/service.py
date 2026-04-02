@@ -97,8 +97,11 @@ def fase1_parse_incassi(file_path: Path) -> pd.DataFrame:
 
     logger.info("  Separatore rilevato: %r", sep)
 
-    df = pd.read_csv(file_path, sep=sep, encoding="utf-8", encoding_errors="replace", dtype=str)
-    df.columns = [c.strip() for c in df.columns]
+    df = pd.read_csv(file_path, sep=sep, encoding="utf-8-sig", encoding_errors="replace", dtype=str)
+    # Pulisce nomi colonna: strip spazi e rimuove eventuali BOM residui
+    df.columns = [c.strip().replace("\ufeff", "") for c in df.columns]
+
+    logger.info("  Colonne trovate nel file incassi: %s", list(df.columns))
 
     # Strip spazi da tutte le celle stringa
     for col in df.columns:
@@ -139,7 +142,9 @@ def fase2_join_importo_aperto(
     logger.info("FASE 2: Join massivo con file incassi per ImportoAperto")
 
     df_massivo = pd.read_excel(file_massivo, dtype=str)
-    df_massivo.columns = [c.strip() for c in df_massivo.columns]
+    df_massivo.columns = [c.strip().replace("\ufeff", "") for c in df_massivo.columns]
+
+    logger.info("  Colonne trovate nel file massivo: %s", list(df_massivo.columns))
 
     # Trova colonne chiave
     col_boll_incassi = _find_column(df_incassi, COL_NR_BOLLETTA_VARIANTS)
