@@ -157,6 +157,9 @@ const Admin = {
                 <div class="form-group">
                     <label><input type="checkbox" id="new-mod-incassi" checked style="width:auto;margin-right:8px;">Incassi Mubi</label>
                 </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="new-mod-connessione" checked style="width:auto;margin-right:8px;">Connessione</label>
+                </div>
             </form>`;
 
         showModal('Nuovo Utente', body, [
@@ -172,6 +175,7 @@ const Admin = {
         const role = document.getElementById('new-role').value;
         const modules = [];
         if (document.getElementById('new-mod-incassi').checked) modules.push('incassi_mubi');
+        if (document.getElementById('new-mod-connessione').checked) modules.push('connessione');
 
         if (!username || !fullName || password.length < 8) {
             showToast('Compilare tutti i campi (password min. 8 caratteri)', 'error');
@@ -220,6 +224,9 @@ const Admin = {
                 <div class="form-group">
                     <label><input type="checkbox" id="edit-mod-incassi" ${modules.includes('incassi_mubi') ? 'checked' : ''} style="width:auto;margin-right:8px;">Incassi Mubi</label>
                 </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="edit-mod-connessione" ${modules.includes('connessione') ? 'checked' : ''} style="width:auto;margin-right:8px;">Connessione</label>
+                </div>
                 <hr style="border-color:var(--border);margin:16px 0;">
                 <div class="form-group">
                     <label>Nuova Password (lasciare vuoto per non cambiare)</label>
@@ -239,6 +246,7 @@ const Admin = {
         const password = document.getElementById('edit-password').value;
         const modules = [];
         if (document.getElementById('edit-mod-incassi').checked) modules.push('incassi_mubi');
+        if (document.getElementById('edit-mod-connessione').checked) modules.push('connessione');
 
         try {
             const res = await Auth.apiRequest(`/admin/users/${userId}`, {

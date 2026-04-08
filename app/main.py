@@ -47,10 +47,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Base.metadata.create_all(bind=engine)
     logger.info("Database inizializzato: %s", settings.DATABASE_URL)
 
-    # Crea utente admin di default se DB vuoto
+    # Crea utente admin di default se DB vuoto + aggiorna moduli utenti esistenti
     db = SessionLocal()
     try:
         ensure_admin_exists(db)
+
+        # Aggiungi modulo 'connessione' agli utenti che non ce l'hanno
+        from app.models import User
+        users = db.query(User).all()
+        for user in users:
+            modules = user.get_modules()
+            if "connessione" not in modules:
+                modules.append("connessione")
+                user.set_modules(modules)
+        db.commit()
     finally:
         db.close()
 
