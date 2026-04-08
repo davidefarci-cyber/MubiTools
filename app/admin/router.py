@@ -39,7 +39,7 @@ class CreateUserRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=8)
     role: str = Field(default="user", pattern="^(admin|user)$")
-    allowed_modules: list[str] = Field(default=["incassi_mubi"])
+    allowed_modules: list[str] = Field(default=["incassi_mubi", "connessione"])
 
 
 class UpdateUserRequest(BaseModel):
