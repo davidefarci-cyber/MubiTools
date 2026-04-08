@@ -162,17 +162,21 @@ const Connessione = {
             const [handle] = await window.showOpenFilePicker({
                 types: [{
                     description: 'File Excel',
-                    accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx', '.xls'] },
+                    accept: {
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                        'application/vnd.ms-excel': ['.xls'],
+                    },
                 }],
                 multiple: false,
             });
             const file = await handle.getFile();
             this.handleFile(file, handle);
         } catch (err) {
-            // L'utente ha annullato il picker — nessuna azione
-            if (err.name !== 'AbortError') {
-                showToast('Errore apertura file: ' + err.message, 'error');
-            }
+            if (err.name === 'AbortError') return;
+            // Qualsiasi altro errore FSA (es. SecurityError su HTTP non-localhost):
+            // fallback silenzioso al picker classico senza handle
+            console.warn('File System Access API non disponibile, fallback a input classico:', err.message);
+            document.getElementById('cr-fileinput').click();
         }
     },
 
@@ -355,6 +359,12 @@ const Connessione = {
         const btn = document.getElementById('cr-btn-save');
         if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio...'; }
         try {
+            // Richiedi esplicitamente permesso di scrittura (Chrome potrebbe chiederlo la prima volta)
+            const permission = await this.fileHandle.requestPermission({ mode: 'readwrite' });
+            if (permission !== 'granted') {
+                showToast('Permesso di scrittura negato — usa "Scarica Risultato"', 'error');
+                return;
+            }
             const blob = await this._fetchResultBlob(jobId);
             const writable = await this.fileHandle.createWritable();
             await writable.write(blob);
