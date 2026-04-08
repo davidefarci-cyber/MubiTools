@@ -20,7 +20,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(String(10), nullable=False, default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    allowed_modules: Mapped[str] = mapped_column(Text, default='["incassi_mubi"]')
+    allowed_modules: Mapped[str] = mapped_column(Text, default='["incassi_mubi","connessione"]')
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
