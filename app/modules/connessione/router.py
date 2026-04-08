@@ -15,7 +15,7 @@ from app.auth.dependencies import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.models import User, log_audit
-from app.modules.connessione.service import crea_riga_file_a
+from app.modules.connessione.service import crea_riga_file_a, estrai_pod_xml
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +23,10 @@ router = APIRouter()
 
 # Store risultati in-memory
 _results: dict[str, dict] = {}
+_xml_results: dict[str, dict] = {}
 
 ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
+ALLOWED_XML_EXTENSIONS = {".xml"}
 MAX_SIZE = settings.MAX_UPLOAD_MB * 1024 * 1024
 
 
@@ -194,4 +196,151 @@ def download_result(
         path=file_path,
         filename=info["original_filename"],
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+# ---------------------------------------------------------------------------
+# XML POD Extractor endpoints
+# ---------------------------------------------------------------------------
+
+
+class EstraiPodRequest(BaseModel):
+    """Richiesta estrazione POD da file XML."""
+
+    file_id: str
+    pods: list[str] = Field(min_length=1, max_length=500)
+
+
+class EstraiPodResponse(BaseModel):
+    """Risposta estrazione POD."""
+
+    job_id: str
+    found: list[str]
+    not_found: list[str]
+    total_requested: int
+    download_ready: bool
+
+
+@router.post("/xml/upload")
+async def upload_xml_file(
+    file: UploadFile,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Upload di un file XML per l'estrazione POD."""
+    if not current_user.has_module("connessione"):
+        raise HTTPException(status_code=403, detail="Modulo non abilitato")
+
+    original_name = file.filename or "unknown"
+    ext = Path(original_name).suffix.lower()
+    if ext not in ALLOWED_XML_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Estensione '{ext}' non consentita. Ammessa: .xml",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File troppo grande ({len(content) // (1024*1024)}MB). Max: {settings.MAX_UPLOAD_MB}MB",
+        )
+
+    file_id = str(uuid.uuid4())
+    save_path = settings.UPLOAD_DIR / f"{file_id}{ext}"
+    save_path.write_bytes(content)
+
+    meta_path = settings.UPLOAD_DIR / f"{file_id}.meta"
+    meta_path.write_text(json.dumps({
+        "original_filename": original_name,
+        "extension": ext,
+        "size_bytes": len(content),
+    }))
+
+    log_audit(
+        db, "connessione_xml_upload",
+        user_id=current_user.id,
+        detail={"file_id": file_id, "filename": original_name, "size": len(content)},
+    )
+
+    logger.info("Connessione XML upload: %s -> %s (%d bytes)", original_name, file_id, len(content))
+
+    return {
+        "file_id": file_id,
+        "original_filename": original_name,
+        "size_bytes": len(content),
+    }
+
+
+@router.post("/xml/estrai", response_model=EstraiPodResponse)
+def process_estrai_pod(
+    request: EstraiPodRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> EstraiPodResponse:
+    """Estrae blocchi DatiPod dal file XML caricato per i codici POD richiesti."""
+    if not current_user.has_module("connessione"):
+        raise HTTPException(status_code=403, detail="Modulo non abilitato")
+
+    source_path = _resolve_file(request.file_id)
+
+    # Normalizza e deduplica la lista POD
+    pods = list({p.strip() for p in request.pods if p.strip()})
+    if not pods:
+        raise HTTPException(status_code=400, detail="Nessun codice POD valido fornito")
+
+    job_id = str(uuid.uuid4())
+
+    try:
+        result = estrai_pod_xml(source_path, pods, settings.UPLOAD_DIR)
+    except Exception as exc:
+        logger.exception("Errore estrazione XML job %s: %s", job_id, exc)
+        raise HTTPException(status_code=500, detail=f"Errore elaborazione: {exc}") from exc
+
+    _xml_results[job_id] = {
+        "zip_path": result["zip_path"],
+    }
+
+    log_audit(
+        db, "connessione_xml_estrai",
+        user_id=current_user.id,
+        detail={
+            "job_id": job_id,
+            "found": len(result["found"]),
+            "not_found": len(result["not_found"]),
+            "total_requested": result["total_requested"],
+        },
+    )
+
+    logger.info(
+        "Connessione XML job %s: %d trovati, %d non trovati",
+        job_id, len(result["found"]), len(result["not_found"]),
+    )
+
+    return EstraiPodResponse(
+        job_id=job_id,
+        found=result["found"],
+        not_found=result["not_found"],
+        total_requested=result["total_requested"],
+        download_ready=True,
+    )
+
+
+@router.get("/xml/download/{job_id}")
+def download_xml_result(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Download del file ZIP con i POD estratti."""
+    if job_id not in _xml_results:
+        raise HTTPException(status_code=404, detail="Risultato non trovato")
+
+    zip_path = Path(_xml_results[job_id]["zip_path"])
+    if not zip_path.exists():
+        raise HTTPException(status_code=404, detail="File ZIP non trovato su disco")
+
+    return FileResponse(
+        path=zip_path,
+        filename=f"pod_extract_{job_id}.zip",
+        media_type="application/zip",
     )

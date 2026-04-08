@@ -5,7 +5,11 @@ Legge un file Excel (FILE B), mappa le colonne verso il formato FILE A,
 applica trasformazioni sui valori e scrive il risultato come nuovo foglio.
 """
 
+import io
 import logging
+import uuid
+import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -257,4 +261,73 @@ def crea_riga_file_a(file_path: Path, sheet_name: str = "Riga FILE A") -> dict:
         "rows_created": len(rows),
         "warnings": sorted(warnings),
         "output_path": str(file_path),
+    }
+
+
+def estrai_pod_xml(file_path: Path, pod_list: list[str], upload_dir: Path) -> dict:
+    """Legge un file XML in streaming ed estrae i blocchi <DatiPod> matching i POD richiesti.
+
+    Produce un file ZIP contenente:
+    - output_{pod}.xml per ogni POD trovato
+    - log.txt con lo stato di ogni POD (OK / NON TROVATO)
+
+    Args:
+        file_path: Path al file XML sorgente.
+        pod_list: Lista di codici POD da cercare.
+        upload_dir: Directory dove salvare il file ZIP di output.
+
+    Returns:
+        dict con keys: zip_path, found, not_found, total_requested.
+    """
+    logger.info("Estrai POD XML: lettura %s, %d POD richiesti", file_path.name, len(pod_list))
+
+    pods = set(pod_list)
+    found: dict[str, bytes] = {}
+
+    context = ET.iterparse(file_path, events=("start", "end"))
+    context = iter(context)
+    event, root_elem = next(context)
+    root_tag = root_elem.tag
+
+    for event, elem in context:
+        if event == "end" and elem.tag == "DatiPod":
+            pod_node = elem.find("Pod")
+            if pod_node is not None and pod_node.text in pods:
+                pod_value = pod_node.text
+                new_root = ET.Element(root_tag)
+                new_root.append(elem)
+                tree = ET.ElementTree(new_root)
+                buf = io.BytesIO()
+                tree.write(buf, encoding="utf-8", xml_declaration=True)
+                found[pod_value] = buf.getvalue()
+            root_elem.clear()
+
+    not_found = sorted(pods - set(found.keys()))
+
+    # Costruisce log
+    log_lines = [f"{pod} -> OK" for pod in sorted(found.keys())]
+    log_lines += [f"{pod} -> NON TROVATO" for pod in not_found]
+
+    # Crea ZIP
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for pod, xml_bytes in found.items():
+            zf.writestr(f"output_{pod}.xml", xml_bytes)
+        zf.writestr("log.txt", "\n".join(log_lines))
+    zip_buf.seek(0)
+
+    job_id = str(uuid.uuid4())
+    zip_path = upload_dir / f"pod_output_{job_id}.zip"
+    zip_path.write_bytes(zip_buf.read())
+
+    logger.info(
+        "Estrai POD XML: %d trovati, %d non trovati -> %s",
+        len(found), len(not_found), zip_path.name,
+    )
+
+    return {
+        "zip_path": str(zip_path),
+        "found": sorted(found.keys()),
+        "not_found": not_found,
+        "total_requested": len(pods),
     }
