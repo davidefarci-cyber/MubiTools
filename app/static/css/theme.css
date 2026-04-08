@@ -568,6 +568,33 @@ tr:hover {
     border-top: 1px solid var(--border);
 }
 
+/* Module sub-tabs */
+.module-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+}
+
+.module-tab {
+    padding: 10px 20px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.module-tab:hover {
+    color: var(--text-primary);
+}
+
+.module-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
 /* Responsive */
 @media (max-width: 1280px) {
     .uploads-grid {
