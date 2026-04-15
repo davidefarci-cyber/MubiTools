@@ -13,6 +13,10 @@ data/uploads/*
 # Encryption key
 data/secret.key
 
+# REMI settings and template
+data/remi_settings.json
+data/remi_template.docx
+
 # Database backups
 data/backups/*
 !data/backups/.gitkeep
