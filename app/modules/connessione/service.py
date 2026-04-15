@@ -199,17 +199,26 @@ def _build_row(df_b: pd.DataFrame, row_idx: int, warnings: set[str]) -> dict:
     return new_row
 
 
-def crea_riga_file_a(file_path: Path, sheet_name: str = "Riga FILE A") -> dict:
-    """Orchestratore: legge FILE B, mappa colonne, scrive foglio FILE A.
+def _get_columns_order() -> list[str]:
+    """Restituisce l'ordine delle colonne con LUNG. dopo PDR."""
+    columns: list[str] = []
+    for k in COL_MAPPING:
+        columns.append(k)
+        if k == "PDR":
+            columns.append("LUNG.")
+    return columns
+
+
+def genera_righe_connessione(file_path: Path) -> dict:
+    """Legge il file Excel e genera le righe per connessione come dati JSON.
 
     Args:
-        file_path: Path al file Excel (FILE B).
-        sheet_name: Nome del foglio da creare nel file.
+        file_path: Path al file Excel sorgente.
 
     Returns:
-        dict con rows_created, warnings, output_path.
+        dict con rows_created, columns, rows, warnings.
     """
-    logger.info("Crea Riga FILE A: lettura %s", file_path.name)
+    logger.info("Genera righe connessione: lettura %s", file_path.name)
 
     df_b = pd.read_excel(
         file_path,
@@ -233,7 +242,62 @@ def crea_riga_file_a(file_path: Path, sheet_name: str = "Riga FILE A") -> dict:
         valid_rows.append(idx)
 
     if not valid_rows:
-        raise ValueError("Il FILE B non contiene righe di dati")
+        raise ValueError("Il file non contiene righe di dati")
+
+    df_b = df_b.iloc[valid_rows].reset_index(drop=True)
+
+    warnings: set[str] = set()
+    rows: list[dict] = []
+    for i in range(len(df_b)):
+        rows.append(_build_row(df_b, i, warnings))
+
+    columns = _get_columns_order()
+    # Converti ogni riga-dict in lista ordinata per colonna
+    rows_data: list[list[str]] = []
+    for row in rows:
+        rows_data.append([str(row.get(c, "")) for c in columns])
+
+    logger.info("Genera righe connessione: %d righe create", len(rows_data))
+
+    return {
+        "rows_created": len(rows_data),
+        "columns": columns,
+        "rows": rows_data,
+        "warnings": sorted(warnings),
+    }
+
+
+# --- Archiviata: scrittura su foglio Excel (per uso futuro) ---
+
+def crea_riga_file_a(file_path: Path, sheet_name: str = "Riga FILE A") -> dict:
+    """Genera righe e le scrive come nuovo foglio Excel nel file sorgente.
+
+    Mantenuta per eventuale riutilizzo futuro in altre sezioni.
+    """
+    logger.info("Crea Riga FILE A: lettura %s", file_path.name)
+
+    df_b = pd.read_excel(
+        file_path,
+        dtype={"PDR": str, "PIVA": str, "CF": str},
+        keep_default_na=False,
+        na_values=[],
+    )
+    df_b.columns = df_b.columns.str.strip()
+
+    valid_rows: list[int] = []
+    for idx in range(len(df_b)):
+        row = df_b.iloc[idx]
+        has_data = any(
+            str(v).strip() not in ("", "nan", "NaN", "None")
+            for v in row
+            if pd.notna(v)
+        )
+        if not has_data:
+            break
+        valid_rows.append(idx)
+
+    if not valid_rows:
+        raise ValueError("Il file non contiene righe di dati")
 
     df_b = df_b.iloc[valid_rows].reset_index(drop=True)
 
@@ -244,7 +308,6 @@ def crea_riga_file_a(file_path: Path, sheet_name: str = "Riga FILE A") -> dict:
 
     df_new = pd.DataFrame(rows)
 
-    # Scrivi nuovo foglio nel file originale
     book = load_workbook(file_path)
     if sheet_name in book.sheetnames:
         std = book[sheet_name]

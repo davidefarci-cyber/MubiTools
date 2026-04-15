@@ -2,7 +2,6 @@
 
 import json
 import logging
-import shutil
 import uuid
 from pathlib import Path
 
@@ -15,14 +14,13 @@ from app.auth.dependencies import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.models import User, log_audit
-from app.modules.connessione.service import crea_riga_file_a, estrai_pod_xml
+from app.modules.connessione.service import genera_righe_connessione, estrai_pod_xml
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Store risultati in-memory
-_results: dict[str, dict] = {}
+# Store risultati in-memory (XML)
 _xml_results: dict[str, dict] = {}
 
 ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
@@ -33,19 +31,18 @@ MAX_SIZE = settings.MAX_UPLOAD_MB * 1024 * 1024
 # --- Schemas ---
 
 class CreaRigaRequest(BaseModel):
-    """Richiesta creazione riga FILE A."""
+    """Richiesta generazione righe connessione."""
 
     file_id: str
-    sheet_name: str = Field(default="Riga FILE A", min_length=1, max_length=100)
 
 
 class CreaRigaResponse(BaseModel):
-    """Risposta creazione riga FILE A."""
+    """Risposta con righe generate per connessione."""
 
-    job_id: str
     rows_created: int
+    columns: list[str]
+    rows: list[list[str]]
     warnings: list[str]
-    download_ready: bool
 
 
 # --- Endpoints ---
@@ -125,77 +122,40 @@ def process_crea_riga(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CreaRigaResponse:
-    """Crea le righe FILE A dal FILE B caricato.
+    """Genera le righe per connessione dal file caricato.
 
-    Elaborazione sincrona: mappa colonne, trasforma valori, scrive foglio.
+    Restituisce le righe come dati JSON da visualizzare a schermo.
     """
     if not current_user.has_module("connessione"):
         raise HTTPException(status_code=403, detail="Modulo non abilitato")
 
     source_path = _resolve_file(request.file_id)
-    job_id = str(uuid.uuid4())
-
-    # Crea copia di lavoro per non modificare l'originale upload
-    work_path = settings.UPLOAD_DIR / f"conn_output_{job_id}{source_path.suffix}"
-    shutil.copy2(source_path, work_path)
 
     try:
-        result = crea_riga_file_a(work_path, request.sheet_name)
+        result = genera_righe_connessione(source_path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("Errore elaborazione connessione job %s: %s", job_id, exc)
+        logger.exception("Errore elaborazione connessione: %s", exc)
         raise HTTPException(status_code=500, detail=f"Errore elaborazione: {exc}") from exc
-
-    # Recupera nome originale per il download
-    meta_path = settings.UPLOAD_DIR / f"{request.file_id}.meta"
-    meta = json.loads(meta_path.read_text())
-
-    _results[job_id] = {
-        "output_path": str(work_path),
-        "original_filename": meta["original_filename"],
-        "rows_created": result["rows_created"],
-        "warnings": result["warnings"],
-    }
 
     log_audit(
         db, "connessione_crea_riga",
         user_id=current_user.id,
         detail={
-            "job_id": job_id,
+            "file_id": request.file_id,
             "rows_created": result["rows_created"],
             "warnings_count": len(result["warnings"]),
         },
     )
 
-    logger.info("Connessione job %s: %d righe create", job_id, result["rows_created"])
+    logger.info("Connessione: %d righe generate", result["rows_created"])
 
     return CreaRigaResponse(
-        job_id=job_id,
         rows_created=result["rows_created"],
+        columns=result["columns"],
+        rows=result["rows"],
         warnings=result["warnings"],
-        download_ready=True,
-    )
-
-
-@router.get("/download/{job_id}")
-def download_result(
-    job_id: str,
-    current_user: User = Depends(get_current_user),
-) -> FileResponse:
-    """Download del file risultato con il foglio FILE A aggiunto."""
-    if job_id not in _results:
-        raise HTTPException(status_code=404, detail="Risultato non trovato")
-
-    info = _results[job_id]
-    file_path = Path(info["output_path"])
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File non trovato su disco")
-
-    return FileResponse(
-        path=file_path,
-        filename=info["original_filename"],
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 
