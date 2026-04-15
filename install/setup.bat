@@ -222,6 +222,10 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 echo   OK - Dipendenze installate
+echo.
+echo   NOTA: LibreOffice e' necessario per la generazione PDF nel modulo Invio REMI.
+echo   Se non gia' presente, installare manualmente da https://www.libreoffice.org
+echo.
 echo [%date% %time%] STEP 7 OK - Dipendenze installate >> "%LOG_FILE%"
 
 REM ─── STEP 8: Download e configurazione NSSM ─────────────────
