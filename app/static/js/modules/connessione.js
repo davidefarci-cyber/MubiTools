@@ -7,12 +7,11 @@ const Connessione = {
     currentSubTab: 'crea-riga',
     fileId: null,
     fileName: null,
-    fileHandle: null,       // FileSystemFileHandle per salvataggio in-place (Chrome/Edge)
     xmlFileId: null,
     xmlFileName: null,
 
     subTabs: [
-        { key: 'crea-riga', label: 'Crea Riga FILE A' },
+        { key: 'crea-riga', label: 'Crea riga per CONNESSIONI' },
         { key: 'estrai-pod', label: 'Estrai POD XML' },
     ],
 
@@ -31,7 +30,6 @@ const Connessione = {
             </div>
         `;
 
-        // Bind tab clicks
         document.querySelectorAll('#conn-tabs .module-tab').forEach(el => {
             el.addEventListener('click', () => {
                 document.querySelectorAll('#conn-tabs .module-tab').forEach(t => t.classList.remove('active'));
@@ -47,7 +45,6 @@ const Connessione = {
     reset() {
         this.fileId = null;
         this.fileName = null;
-        this.fileHandle = null;
         this.xmlFileId = null;
         this.xmlFileName = null;
     },
@@ -66,11 +63,18 @@ const Connessione = {
         }
     },
 
+    // -----------------------------------------------------------------------
+    // Tab: Crea riga per CONNESSIONI
+    // -----------------------------------------------------------------------
+
     renderCreaRiga(container) {
+        this.fileId = null;
+        this.fileName = null;
+
         container.innerHTML = `
             <div id="cr-upload-section">
                 <p style="color:var(--text-muted);margin-bottom:16px;">
-                    Carica il FILE B per generare automaticamente le righe nel formato FILE A.
+                    Trascina o seleziona il file Excel per generare le righe connessione.
                 </p>
 
                 <div class="upload-box">
@@ -80,22 +84,11 @@ const Connessione = {
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
                             </svg>
                         </div>
-                        <p class="dropzone-title">FILE B</p>
-                        <p class="dropzone-hint">.xlsx, .xls</p>
-                        <p class="dropzone-hint" id="cr-save-hint" style="font-size:0.75rem;margin-top:2px;"></p>
+                        <p class="dropzone-title">File Excel</p>
+                        <p class="dropzone-hint">.xlsx, .xls — trascina o clicca per selezionare</p>
                         <p class="dropzone-filename" id="cr-filename"></p>
                     </div>
                     <input type="file" id="cr-fileinput" accept=".xlsx,.xls" style="display:none;">
-                </div>
-
-                <div class="form-group" style="margin-top:16px;max-width:300px;">
-                    <label for="cr-sheet-name">Nome foglio da creare</label>
-                    <input type="text" id="cr-sheet-name" value="Riga FILE A" placeholder="Riga FILE A">
-                </div>
-
-                <div style="margin-top:16px;display:flex;gap:12px;align-items:center;">
-                    <button class="btn btn-primary" id="cr-btn-process" disabled>Crea Riga</button>
-                    <button class="btn btn-cancel" id="cr-btn-clear" style="display:none;">Cancella file</button>
                 </div>
             </div>
 
@@ -104,66 +97,20 @@ const Connessione = {
                 <p style="text-align:center;color:var(--text-muted);margin-top:12px;">Elaborazione in corso...</p>
             </div>
 
-            <div id="cr-results" style="display:none;margin-top:24px;"></div>
+            <div id="cr-results" style="display:none;"></div>
         `;
 
-        // Mostra hint salvataggio in-place se il browser lo supporta
-        const hint = document.getElementById('cr-save-hint');
-        if (hint) {
-            if (this._fsaSupported()) {
-                hint.textContent = 'Clic per aprire — il file verrà salvato automaticamente in-place';
-            } else {
-                hint.innerHTML = 'Salvataggio in-place non disponibile — '
-                    + '<a href="#" id="cr-fsa-help" style="color:var(--accent-amber);text-decoration:underline;">abilita il supporto</a>';
-            }
-        }
-        const fsaHelp = document.getElementById('cr-fsa-help');
-        if (fsaHelp) {
-            fsaHelp.addEventListener('click', (e) => {
-                e.preventDefault();
-                const origin = window.location.origin;
-                showModal('Abilita salvataggio in-place', `
-                    <p style="color:var(--text-muted);margin-bottom:12px;">
-                        Per sovrascrivere direttamente il file originale, abilita il supporto nel browser:
-                    </p>
-                    <ol style="color:var(--text-primary);padding-left:20px;line-height:2;">
-                        <li>Copia questo indirizzo nella barra di Chrome:<br>
-                            <code id="fsa-flag-url" style="background:var(--bg-tertiary);padding:4px 8px;border-radius:4px;cursor:pointer;user-select:all;">chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>
-                        </li>
-                        <li>Nel campo di testo, aggiungi:<br>
-                            <code style="background:var(--bg-tertiary);padding:4px 8px;border-radius:4px;user-select:all;">${App.escapeHtml(origin)}</code>
-                        </li>
-                        <li>Imposta il flag su <strong>Enabled</strong></li>
-                        <li>Clicca <strong>Relaunch</strong> per riavviare Chrome</li>
-                    </ol>
-                `, [
-                    { label: 'Chiudi', class: 'btn-cancel', onClick: (overlay) => overlay.remove() },
-                ]);
-            });
-        }
-
         this.bindCreaRigaEvents();
-    },
-
-    _fsaSupported() {
-        return typeof window.showOpenFilePicker === 'function';
     },
 
     bindCreaRigaEvents() {
         const dropzone = document.getElementById('cr-dropzone');
         const input = document.getElementById('cr-fileinput');
 
-        dropzone.addEventListener('click', () => {
-            if (this._fsaSupported()) {
-                this._openWithFilePicker();
-            } else {
-                input.click();
-            }
-        });
+        dropzone.addEventListener('click', () => input.click());
 
-        // Fallback <input> — usato su Firefox e da drag & drop
         input.addEventListener('change', () => {
-            if (input.files.length > 0) this.handleFile(input.files[0], null);
+            if (input.files.length > 0) this.handleFile(input.files[0]);
         });
 
         dropzone.addEventListener('dragover', (e) => {
@@ -173,53 +120,14 @@ const Connessione = {
         dropzone.addEventListener('dragleave', () => {
             dropzone.classList.remove('dragover');
         });
-        dropzone.addEventListener('drop', async (e) => {
+        dropzone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropzone.classList.remove('dragover');
-            if (e.dataTransfer.items.length > 0) {
-                const item = e.dataTransfer.items[0];
-                let handle = null;
-                // Tenta di ottenere il FileSystemFileHandle anche da drag & drop (Chrome 86+)
-                if (item.getAsFileSystemHandle) {
-                    try {
-                        handle = await item.getAsFileSystemHandle();
-                    } catch (err) {
-                        console.warn('getAsFileSystemHandle fallito:', err);
-                    }
-                }
-                const file = e.dataTransfer.files[0];
-                if (file) this.handleFile(file, handle);
-            }
+            if (e.dataTransfer.files.length > 0) this.handleFile(e.dataTransfer.files[0]);
         });
-
-        document.getElementById('cr-btn-process').addEventListener('click', () => this.processFile());
-        document.getElementById('cr-btn-clear').addEventListener('click', () => this.clearFile());
     },
 
-    async _openWithFilePicker() {
-        try {
-            const [handle] = await window.showOpenFilePicker({
-                types: [{
-                    description: 'File Excel',
-                    accept: {
-                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-                        'application/vnd.ms-excel': ['.xls'],
-                    },
-                }],
-                multiple: false,
-            });
-            const file = await handle.getFile();
-            this.handleFile(file, handle);
-        } catch (err) {
-            if (err.name === 'AbortError') return;
-            // Qualsiasi altro errore FSA (es. SecurityError su HTTP non-localhost):
-            // fallback silenzioso al picker classico senza handle
-            console.warn('File System Access API non disponibile, fallback a input classico:', err.message);
-            document.getElementById('cr-fileinput').click();
-        }
-    },
-
-    async handleFile(file, handle) {
+    async handleFile(file) {
         const fnameEl = document.getElementById('cr-filename');
         const dropzone = document.getElementById('cr-dropzone');
 
@@ -244,13 +152,12 @@ const Connessione = {
             const data = await res.json();
             this.fileId = data.file_id;
             this.fileName = data.original_filename;
-            this.fileHandle = handle || null;
 
-            const size = (data.size_bytes / 1024).toFixed(1);
-            const inPlaceNote = this.fileHandle ? ' · salvataggio in-place attivo' : '';
-            fnameEl.textContent = `${data.original_filename} (${size} KB)${inPlaceNote}`;
-            fnameEl.style.color = 'var(--accent-green)';
-            dropzone.style.borderColor = 'var(--accent-green)';
+            fnameEl.textContent = `${data.original_filename} — elaborazione...`;
+            fnameEl.style.color = 'var(--accent-amber)';
+
+            // Avvia automaticamente l'elaborazione
+            await this.processFile();
 
         } catch (err) {
             fnameEl.textContent = `Errore: ${err.message}`;
@@ -258,48 +165,21 @@ const Connessione = {
             dropzone.style.borderColor = 'var(--accent-red)';
             this.fileId = null;
             this.fileName = null;
-            this.fileHandle = null;
         }
-
-        this.updateButtons();
-    },
-
-    updateButtons() {
-        document.getElementById('cr-btn-process').disabled = !this.fileId;
-        document.getElementById('cr-btn-clear').style.display = this.fileId ? 'inline-flex' : 'none';
-    },
-
-    clearFile() {
-        this.fileId = null;
-        this.fileName = null;
-        this.fileHandle = null;
-        document.getElementById('cr-filename').textContent = '';
-        document.getElementById('cr-dropzone').style.borderColor = '';
-        document.getElementById('cr-fileinput').value = '';
-        document.getElementById('cr-results').style.display = 'none';
-        this.updateButtons();
     },
 
     async processFile() {
         if (!this.fileId) return;
 
-        const btn = document.getElementById('cr-btn-process');
-        btn.disabled = true;
-        btn.textContent = 'Elaborazione...';
-
+        document.getElementById('cr-upload-section').style.display = 'none';
         document.getElementById('cr-processing').style.display = 'block';
         document.getElementById('cr-results').style.display = 'none';
-
-        const sheetName = document.getElementById('cr-sheet-name').value.trim() || 'Riga FILE A';
 
         try {
             const res = await Auth.apiRequest('/api/connessione/crea-riga', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    file_id: this.fileId,
-                    sheet_name: sheetName,
-                }),
+                body: JSON.stringify({ file_id: this.fileId }),
             });
 
             if (!res.ok) {
@@ -308,28 +188,39 @@ const Connessione = {
             }
 
             const data = await res.json();
-            this.showResults(data, sheetName);
-            showToast(`${data.rows_created} riga/e creata/e con successo`, 'success');
+            this.showResults(data);
+            showToast(`${data.rows_created} riga/e generata/e`, 'success');
 
         } catch (err) {
             showToast(err.message, 'error');
+            document.getElementById('cr-upload-section').style.display = 'block';
             document.getElementById('cr-results').style.display = 'block';
             document.getElementById('cr-results').innerHTML = `
-                <div style="background:rgba(231,76,60,0.1);border:1px solid var(--accent-red);border-radius:8px;padding:16px;">
+                <div style="background:rgba(231,76,60,0.1);border:1px solid var(--accent-red);border-radius:8px;padding:16px;margin-top:16px;">
                     <div style="font-weight:600;color:var(--accent-red);margin-bottom:8px;">Errore</div>
                     <p style="color:var(--text-muted);margin:0;">${App.escapeHtml(err.message)}</p>
                 </div>
             `;
         } finally {
             document.getElementById('cr-processing').style.display = 'none';
-            btn.textContent = 'Crea Riga';
-            btn.disabled = false;
         }
     },
 
-    showResults(data, sheetName) {
+    showResults(data) {
         const resultsEl = document.getElementById('cr-results');
         resultsEl.style.display = 'block';
+
+        const columns = data.columns || [];
+        const rows = data.rows || [];
+
+        // Costruisci intestazioni tabella
+        const thHtml = columns.map(c => `<th>${App.escapeHtml(c)}</th>`).join('');
+
+        // Costruisci righe tabella
+        const tbodyHtml = rows.map(row => {
+            const cells = row.map(v => `<td>${App.escapeHtml(v)}</td>`).join('');
+            return `<tr>${cells}</tr>`;
+        }).join('');
 
         let warningsHtml = '';
         if (data.warnings && data.warnings.length > 0) {
@@ -346,14 +237,10 @@ const Connessione = {
         }
 
         resultsEl.innerHTML = `
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px;">
                 <div class="stat-card">
-                    <div class="stat-label">Righe create</div>
+                    <div class="stat-label">Righe generate</div>
                     <div class="stat-value" style="color:var(--accent-green)">${data.rows_created}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Foglio</div>
-                    <div class="stat-value" style="font-size:1rem;">${App.escapeHtml(sheetName)}</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Avvisi</div>
@@ -361,106 +248,92 @@ const Connessione = {
                 </div>
             </div>
 
-            <div style="display:flex;gap:12px;flex-wrap:wrap;">
-                ${this.fileHandle
-                    ? `<button class="btn btn-primary" id="cr-btn-save">Salva in-place</button>`
-                    : this._fsaSupported()
-                        ? `<button class="btn btn-primary" id="cr-btn-saveas">Salva come...</button>`
-                        : `<button class="btn btn-primary" id="cr-btn-download">Scarica Risultato</button>`
-                }
+            <div style="position:relative;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+                <button class="btn btn-primary" id="cr-btn-copy"
+                    style="position:absolute;top:8px;right:8px;z-index:2;padding:6px 14px;font-size:0.8rem;">
+                    Copia righe
+                </button>
+                <div style="overflow-x:auto;max-height:420px;overflow-y:auto;">
+                    <table id="cr-table" style="border-collapse:collapse;font-size:0.78rem;white-space:nowrap;width:max-content;">
+                        <thead>
+                            <tr style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;">
+                                ${thHtml}
+                            </tr>
+                        </thead>
+                        <tbody>${tbodyHtml}</tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div style="margin-top:16px;">
                 <button class="btn btn-cancel" id="cr-btn-new">Nuova Elaborazione</button>
             </div>
 
             ${warningsHtml}
         `;
 
-        if (this.fileHandle) {
-            document.getElementById('cr-btn-save').addEventListener('click', () => {
-                this.saveInPlace(data.job_id);
+        // Stili inline per celle tabella
+        resultsEl.querySelectorAll('th').forEach(th => {
+            Object.assign(th.style, {
+                padding: '8px 10px',
+                textAlign: 'left',
+                fontWeight: '600',
+                color: 'var(--text-primary)',
+                borderBottom: '2px solid var(--border)',
+                fontSize: '0.72rem',
             });
-        } else if (this._fsaSupported()) {
-            document.getElementById('cr-btn-saveas').addEventListener('click', () => {
-                this.saveWithPicker(data.job_id);
+        });
+        resultsEl.querySelectorAll('td').forEach(td => {
+            Object.assign(td.style, {
+                padding: '6px 10px',
+                color: 'var(--text-muted)',
+                borderBottom: '1px solid var(--border)',
             });
-        } else {
-            document.getElementById('cr-btn-download').addEventListener('click', () => {
-                this.downloadResult(data.job_id);
-            });
-        }
+        });
+
+        // Copia righe (senza intestazione) in formato TSV per incolla su Excel
+        document.getElementById('cr-btn-copy').addEventListener('click', () => {
+            this.copyRowsToClipboard(columns, rows);
+        });
         document.getElementById('cr-btn-new').addEventListener('click', () => {
             this.renderCreaRiga(document.getElementById('conn-subtab-content'));
         });
     },
 
-    async _fetchResultBlob(jobId) {
-        const res = await fetch(`/api/connessione/download/${jobId}`, {
-            headers: Auth.authHeaders(),
-        });
-        if (!res.ok) throw new Error('Download fallito');
-        return res.blob();
-    },
+    async copyRowsToClipboard(columns, rows) {
+        const btn = document.getElementById('cr-btn-copy');
 
-    async saveInPlace(jobId) {
-        const btn = document.getElementById('cr-btn-save');
-        if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio...'; }
+        // TSV: solo dati (senza intestazioni) — pronto per incolla su Excel
+        const tsv = rows.map(row => row.join('\t')).join('\r\n');
+
+        // HTML table: solo dati (per incolla formattato)
+        const htmlRows = rows.map(row =>
+            '<tr>' + row.map(v => `<td>${App.escapeHtml(v)}</td>`).join('') + '</tr>'
+        ).join('');
+        const html = `<table><tbody>${htmlRows}</tbody></table>`;
+
         try {
-            // Richiedi esplicitamente permesso di scrittura (Chrome potrebbe chiederlo la prima volta)
-            const permission = await this.fileHandle.requestPermission({ mode: 'readwrite' });
-            if (permission !== 'granted') {
-                showToast('Permesso di scrittura negato — usa "Scarica Risultato"', 'error');
-                return;
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    'text/plain': new Blob([tsv], { type: 'text/plain' }),
+                    'text/html': new Blob([html], { type: 'text/html' }),
+                }),
+            ]);
+            btn.textContent = 'Copiato!';
+            btn.style.background = 'var(--accent-green)';
+            setTimeout(() => {
+                btn.textContent = 'Copia righe';
+                btn.style.background = '';
+            }, 2000);
+        } catch (e) {
+            // Fallback: copia solo testo
+            try {
+                await navigator.clipboard.writeText(tsv);
+                btn.textContent = 'Copiato!';
+                setTimeout(() => { btn.textContent = 'Copia righe'; }, 2000);
+            } catch {
+                showToast('Impossibile copiare negli appunti', 'error');
             }
-            const blob = await this._fetchResultBlob(jobId);
-            const writable = await this.fileHandle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-            showToast('File salvato in-place con successo', 'success');
-        } catch (e) {
-            showToast('Errore durante il salvataggio: ' + e.message, 'error');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Salva in-place'; }
-        }
-    },
-
-    async saveWithPicker(jobId) {
-        const btn = document.getElementById('cr-btn-saveas');
-        if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio...'; }
-        try {
-            const handle = await window.showSaveFilePicker({
-                suggestedName: this.fileName || 'risultato.xlsx',
-                types: [{
-                    description: 'File Excel',
-                    accept: {
-                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-                    },
-                }],
-            });
-            const blob = await this._fetchResultBlob(jobId);
-            const writable = await handle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-            showToast('File salvato con successo', 'success');
-        } catch (e) {
-            if (e.name === 'AbortError') return; // utente ha annullato il picker
-            showToast('Errore durante il salvataggio: ' + e.message, 'error');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = 'Salva come...'; }
-        }
-    },
-
-    async downloadResult(jobId) {
-        try {
-            const blob = await this._fetchResultBlob(jobId);
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = this.fileName || 'risultato.xlsx';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-        } catch (e) {
-            showToast('Errore durante il download', 'error');
         }
     },
 
