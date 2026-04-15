@@ -203,7 +203,7 @@ const App = {
 };
 
 // Toast utility
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', duration = 3500) {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
@@ -214,7 +214,7 @@ function showToast(message, type = 'info') {
         toast.style.transform = 'translateY(20px)';
         toast.style.transition = '0.3s ease';
         setTimeout(() => toast.remove(), 300);
-    }, 3500);
+    }, duration);
 }
 
 // Modal utility

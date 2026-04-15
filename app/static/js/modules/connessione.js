@@ -110,9 +110,36 @@ const Connessione = {
         // Mostra hint salvataggio in-place se il browser lo supporta
         const hint = document.getElementById('cr-save-hint');
         if (hint) {
-            hint.textContent = this._fsaSupported()
-                ? 'Clic per aprire — il file verrà salvato automaticamente in-place'
-                : 'Trascina o clicca — il risultato verrà scaricato come file';
+            if (this._fsaSupported()) {
+                hint.textContent = 'Clic per aprire — il file verrà salvato automaticamente in-place';
+            } else {
+                hint.innerHTML = 'Salvataggio in-place non disponibile — '
+                    + '<a href="#" id="cr-fsa-help" style="color:var(--accent-amber);text-decoration:underline;">abilita il supporto</a>';
+            }
+        }
+        const fsaHelp = document.getElementById('cr-fsa-help');
+        if (fsaHelp) {
+            fsaHelp.addEventListener('click', (e) => {
+                e.preventDefault();
+                const origin = window.location.origin;
+                showModal('Abilita salvataggio in-place', `
+                    <p style="color:var(--text-muted);margin-bottom:12px;">
+                        Per sovrascrivere direttamente il file originale, abilita il supporto nel browser:
+                    </p>
+                    <ol style="color:var(--text-primary);padding-left:20px;line-height:2;">
+                        <li>Copia questo indirizzo nella barra di Chrome:<br>
+                            <code id="fsa-flag-url" style="background:var(--bg-tertiary);padding:4px 8px;border-radius:4px;cursor:pointer;user-select:all;">chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>
+                        </li>
+                        <li>Nel campo di testo, aggiungi:<br>
+                            <code style="background:var(--bg-tertiary);padding:4px 8px;border-radius:4px;user-select:all;">${App.escapeHtml(origin)}</code>
+                        </li>
+                        <li>Imposta il flag su <strong>Enabled</strong></li>
+                        <li>Clicca <strong>Relaunch</strong> per riavviare Chrome</li>
+                    </ol>
+                `, [
+                    { label: 'Chiudi', class: 'btn-cancel', onClick: (overlay) => overlay.remove() },
+                ]);
+            });
         }
 
         this.bindCreaRigaEvents();
@@ -146,11 +173,23 @@ const Connessione = {
         dropzone.addEventListener('dragleave', () => {
             dropzone.classList.remove('dragover');
         });
-        dropzone.addEventListener('drop', (e) => {
+        dropzone.addEventListener('drop', async (e) => {
             e.preventDefault();
             dropzone.classList.remove('dragover');
-            // Drag & drop non fornisce un FileHandle → salvataggio classico
-            if (e.dataTransfer.files.length > 0) this.handleFile(e.dataTransfer.files[0], null);
+            if (e.dataTransfer.items.length > 0) {
+                const item = e.dataTransfer.items[0];
+                let handle = null;
+                // Tenta di ottenere il FileSystemFileHandle anche da drag & drop (Chrome 86+)
+                if (item.getAsFileSystemHandle) {
+                    try {
+                        handle = await item.getAsFileSystemHandle();
+                    } catch (err) {
+                        console.warn('getAsFileSystemHandle fallito:', err);
+                    }
+                }
+                const file = e.dataTransfer.files[0];
+                if (file) this.handleFile(file, handle);
+            }
         });
 
         document.getElementById('cr-btn-process').addEventListener('click', () => this.processFile());
@@ -325,7 +364,9 @@ const Connessione = {
             <div style="display:flex;gap:12px;flex-wrap:wrap;">
                 ${this.fileHandle
                     ? `<button class="btn btn-primary" id="cr-btn-save">Salva in-place</button>`
-                    : `<button class="btn btn-primary" id="cr-btn-download">Scarica Risultato</button>`
+                    : this._fsaSupported()
+                        ? `<button class="btn btn-primary" id="cr-btn-saveas">Salva come...</button>`
+                        : `<button class="btn btn-primary" id="cr-btn-download">Scarica Risultato</button>`
                 }
                 <button class="btn btn-cancel" id="cr-btn-new">Nuova Elaborazione</button>
             </div>
@@ -336,6 +377,10 @@ const Connessione = {
         if (this.fileHandle) {
             document.getElementById('cr-btn-save').addEventListener('click', () => {
                 this.saveInPlace(data.job_id);
+            });
+        } else if (this._fsaSupported()) {
+            document.getElementById('cr-btn-saveas').addEventListener('click', () => {
+                this.saveWithPicker(data.job_id);
             });
         } else {
             document.getElementById('cr-btn-download').addEventListener('click', () => {
@@ -374,6 +419,32 @@ const Connessione = {
             showToast('Errore durante il salvataggio: ' + e.message, 'error');
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = 'Salva in-place'; }
+        }
+    },
+
+    async saveWithPicker(jobId) {
+        const btn = document.getElementById('cr-btn-saveas');
+        if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio...'; }
+        try {
+            const handle = await window.showSaveFilePicker({
+                suggestedName: this.fileName || 'risultato.xlsx',
+                types: [{
+                    description: 'File Excel',
+                    accept: {
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                    },
+                }],
+            });
+            const blob = await this._fetchResultBlob(jobId);
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            showToast('File salvato con successo', 'success');
+        } catch (e) {
+            if (e.name === 'AbortError') return; // utente ha annullato il picker
+            showToast('Errore durante il salvataggio: ' + e.message, 'error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Salva come...'; }
         }
     },
 
