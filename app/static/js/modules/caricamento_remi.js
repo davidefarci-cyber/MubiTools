@@ -7,6 +7,8 @@ const CaricamentoRemi = {
     currentTab: 'anagrafica',
     registry: [],
     searchTerm: '',
+    matchResults: null,
+    matchEffectiveDate: '',
 
     render(container) {
         this.registry = [];
@@ -45,11 +47,7 @@ const CaricamentoRemi = {
         const content = document.getElementById('remi-tab-content');
         switch (this.currentTab) {
             case 'caricamento':
-                content.innerHTML = `
-                    <div class="card" style="text-align:center;padding:60px 20px;">
-                        <p style="color:var(--text-muted);font-size:1.1rem;">Caricamento REMI</p>
-                        <p style="color:var(--text-muted);font-size:0.9rem;margin-top:8px;">In arrivo</p>
-                    </div>`;
+                this.renderCaricamento(content);
                 break;
             case 'anagrafica':
                 this.renderAnagrafica(content);
@@ -61,6 +59,243 @@ const CaricamentoRemi = {
                         <p style="color:var(--text-muted);font-size:0.9rem;margin-top:8px;">In arrivo</p>
                     </div>`;
                 break;
+        }
+    },
+
+    // --- Caricamento REMI ---
+
+    renderCaricamento(container) {
+        this.matchResults = null;
+        this.matchEffectiveDate = '';
+        this.renderCaricamentoForm(container);
+    },
+
+    renderCaricamentoForm(container) {
+        container.innerHTML = `
+            <div class="card">
+                <div class="card-title">Caricamento Pratiche REMI</div>
+                <div class="form-group">
+                    <label>Incolla qui i dati da Excel (due colonne: P.IVA e Codice REMI)</label>
+                    <textarea id="remi-paste-area" rows="12" style="width:100%;padding:12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-family:monospace;font-size:0.9rem;resize:vertical;" placeholder="01234567890&#9;IT001E00123456&#10;09876543210&#9;IT001E00654321"></textarea>
+                    <p style="color:var(--text-muted);font-size:0.8rem;margin-top:4px;">Copia direttamente da Excel — sono accettate colonne separate da tab</p>
+                </div>
+                <div class="form-group">
+                    <label>Data decorrenza <span style="color:var(--accent-red)">*</span></label>
+                    <input type="date" id="remi-effective-date" required style="padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.9rem;max-width:220px;">
+                </div>
+                <div style="margin-top:16px;">
+                    <button class="btn btn-primary" id="btn-remi-match">Esegui Match</button>
+                </div>
+            </div>`;
+
+        document.getElementById('btn-remi-match').addEventListener('click', () => this.executeMatch());
+    },
+
+    parseExcelPaste(text) {
+        const rows = [];
+        const lines = text.split('\n');
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            const cols = trimmed.split('\t');
+            if (cols.length < 2) continue;
+            const vatNumber = cols[0].trim();
+            const remiCode = cols[1].trim();
+            if (vatNumber && remiCode) {
+                rows.push({ vat_number: vatNumber, remi_code: remiCode });
+            }
+        }
+        return rows;
+    },
+
+    async executeMatch() {
+        const text = document.getElementById('remi-paste-area').value;
+        const effectiveDate = document.getElementById('remi-effective-date').value;
+
+        if (!effectiveDate) {
+            showToast('Inserire la data decorrenza', 'error');
+            return;
+        }
+
+        const parsed = this.parseExcelPaste(text);
+        if (!parsed.length) {
+            showToast('Nessuna riga valida trovata. Verificare il formato (P.IVA + tab + Codice REMI)', 'error');
+            return;
+        }
+
+        this.matchEffectiveDate = effectiveDate;
+
+        const content = document.getElementById('remi-tab-content');
+        content.innerHTML = `
+            <div class="card" style="text-align:center;padding:40px;">
+                <div class="spinner" style="margin:0 auto 16px;"></div>
+                <p style="color:var(--text-muted);">Esecuzione match in corso...</p>
+            </div>`;
+
+        try {
+            const res = await Auth.apiRequest('/api/caricamento-remi/match', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(parsed),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore durante il match');
+            }
+            this.matchResults = await res.json();
+            this.renderMatchResults(content);
+        } catch (err) {
+            content.innerHTML = `
+                <div class="card">
+                    <p style="color:var(--accent-red);">${App.escapeHtml(err.message)}</p>
+                    <button class="btn btn-primary" id="btn-remi-retry" style="margin-top:16px;">Riprova</button>
+                </div>`;
+            document.getElementById('btn-remi-retry').addEventListener('click', () => this.renderCaricamento(content));
+        }
+    },
+
+    renderMatchResults(container) {
+        const results = this.matchResults;
+        const matched = results.filter(r => r.matched);
+        const notMatched = results.filter(r => !r.matched);
+
+        let warningBanner = '';
+        if (notMatched.length > 0) {
+            warningBanner = `
+                <div style="background:rgba(255,193,7,0.15);border:1px solid rgba(255,193,7,0.4);border-radius:8px;padding:12px 16px;margin-bottom:16px;color:var(--text-primary);font-size:0.9rem;">
+                    ⚠ Le righe evidenziate non verranno caricate. Verificare l'anagrafica prima di procedere.
+                </div>`;
+        }
+
+        const rows = results.map(r => {
+            const rowBg = r.matched ? '' : 'background:rgba(220,53,69,0.08);';
+            const badge = r.matched
+                ? '<span class="badge badge-active">Trovato</span>'
+                : '<span class="badge badge-disabled" style="background:rgba(220,53,69,0.15);color:#dc3545;">Non trovato</span>';
+            const companyName = r.company_name
+                ? App.escapeHtml(r.company_name)
+                : '<span style="color:var(--text-muted);font-style:italic;">Verificare in anagrafica</span>';
+            const pecAddress = r.pec_address ? App.escapeHtml(r.pec_address) : '—';
+
+            return `
+                <tr style="${rowBg}">
+                    <td style="font-family:monospace;">${App.escapeHtml(r.vat_number)}</td>
+                    <td style="font-family:monospace;">${App.escapeHtml(r.remi_code)}</td>
+                    <td>${companyName}</td>
+                    <td>${pecAddress}</td>
+                    <td>${badge}</td>
+                </tr>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="card">
+                <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+                    <span>Risultato Match</span>
+                    <span style="font-size:0.85rem;font-weight:normal;color:var(--text-muted);">Data decorrenza: ${App.escapeHtml(this.matchEffectiveDate)}</span>
+                </div>
+                <div style="margin-bottom:16px;font-size:0.9rem;">
+                    <span style="color:var(--accent-green);font-weight:600;">${matched.length} righe trovate</span>,
+                    <span style="color:${notMatched.length ? '#dc3545' : 'var(--text-muted)'};font-weight:600;">${notMatched.length} non trovate</span>
+                </div>
+                ${warningBanner}
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>P.IVA</th>
+                                <th>Codice REMI</th>
+                                <th>Ragione Sociale</th>
+                                <th>PEC</th>
+                                <th>Stato</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+                <div style="display:flex;gap:12px;margin-top:20px;">
+                    <button class="btn btn-primary" id="btn-remi-confirm">Conferma Inserimento</button>
+                    <button class="btn btn-cancel" id="btn-remi-reset">Nuovo Inserimento</button>
+                </div>
+            </div>`;
+
+        document.getElementById('btn-remi-confirm').addEventListener('click', () => this.handleConfirm());
+        document.getElementById('btn-remi-reset').addEventListener('click', () => {
+            this.renderCaricamento(document.getElementById('remi-tab-content'));
+        });
+    },
+
+    handleConfirm() {
+        const results = this.matchResults;
+        const matched = results.filter(r => r.matched);
+        const notMatched = results.filter(r => !r.matched);
+
+        if (matched.length === 0) {
+            showToast('Nessuna riga valida da caricare', 'error');
+            return;
+        }
+
+        if (notMatched.length > 0) {
+            // Mostra modale di conferma
+            const body = `
+                <p style="margin-bottom:16px;line-height:1.5;">
+                    <strong>${notMatched.length} righe non riconosciute</strong> non verranno caricate.<br>
+                    Confermi di voler procedere con le <strong>${matched.length} righe valide</strong>?
+                </p>`;
+
+            showModal('Conferma inserimento', body, [
+                { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+                { label: 'Conferma', class: 'btn-primary', onClick: () => {
+                    closeModal();
+                    this.submitConfirm();
+                }},
+            ]);
+        } else {
+            // Tutte matched: conferma diretta
+            this.submitConfirm();
+        }
+    },
+
+    async submitConfirm() {
+        const matched = this.matchResults.filter(r => r.matched);
+        const rows = matched.map(r => ({
+            vat_number: r.vat_number,
+            remi_code: r.remi_code,
+            company_name: r.company_name,
+            pec_address: r.pec_address,
+        }));
+
+        const content = document.getElementById('remi-tab-content');
+        const confirmBtn = document.getElementById('btn-remi-confirm');
+        if (confirmBtn) {
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Inserimento in corso...';
+        }
+
+        try {
+            const res = await Auth.apiRequest('/api/caricamento-remi/confirm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    effective_date: this.matchEffectiveDate,
+                    rows: rows,
+                }),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore durante l\'inserimento');
+            }
+            const result = await res.json();
+            showToast(`Inserimento completato: ${result.inserted} pratiche caricate con successo`, 'success');
+
+            setTimeout(() => {
+                this.renderCaricamento(document.getElementById('remi-tab-content'));
+            }, 2000);
+        } catch (err) {
+            showToast(err.message, 'error');
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Conferma Inserimento';
+            }
         }
     },
 
