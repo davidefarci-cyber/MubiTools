@@ -248,13 +248,9 @@ const Connessione = {
                 </div>
             </div>
 
-            <div style="position:relative;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
-                <button class="btn btn-primary" id="cr-btn-copy"
-                    style="position:absolute;top:8px;right:8px;z-index:2;padding:6px 14px;font-size:0.8rem;">
-                    Copia righe
-                </button>
-                <div style="overflow-x:auto;max-height:420px;overflow-y:auto;">
-                    <table id="cr-table" style="border-collapse:collapse;font-size:0.78rem;white-space:nowrap;width:max-content;">
+            <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+                <div style="overflow:auto;max-height:260px;">
+                    <table id="cr-table" style="border-collapse:collapse;font-size:0.78rem;white-space:nowrap;">
                         <thead>
                             <tr style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;">
                                 ${thHtml}
@@ -265,7 +261,8 @@ const Connessione = {
                 </div>
             </div>
 
-            <div style="margin-top:16px;">
+            <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
+                <button class="btn btn-primary" id="cr-btn-copy">Copia righe</button>
                 <button class="btn btn-cancel" id="cr-btn-new">Nuova Elaborazione</button>
             </div>
 
@@ -300,40 +297,31 @@ const Connessione = {
         });
     },
 
-    async copyRowsToClipboard(columns, rows) {
+    copyRowsToClipboard(columns, rows) {
         const btn = document.getElementById('cr-btn-copy');
 
         // TSV: solo dati (senza intestazioni) — pronto per incolla su Excel
         const tsv = rows.map(row => row.join('\t')).join('\r\n');
 
-        // HTML table: solo dati (per incolla formattato)
-        const htmlRows = rows.map(row =>
-            '<tr>' + row.map(v => `<td>${App.escapeHtml(v)}</td>`).join('') + '</tr>'
-        ).join('');
-        const html = `<table><tbody>${htmlRows}</tbody></table>`;
+        // Usa textarea nascosta + execCommand (funziona anche su HTTP)
+        const textarea = document.createElement('textarea');
+        textarea.value = tsv;
+        textarea.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
+        document.body.appendChild(textarea);
+        textarea.select();
 
         try {
-            await navigator.clipboard.write([
-                new ClipboardItem({
-                    'text/plain': new Blob([tsv], { type: 'text/plain' }),
-                    'text/html': new Blob([html], { type: 'text/html' }),
-                }),
-            ]);
+            document.execCommand('copy');
             btn.textContent = 'Copiato!';
             btn.style.background = 'var(--accent-green)';
             setTimeout(() => {
                 btn.textContent = 'Copia righe';
                 btn.style.background = '';
             }, 2000);
-        } catch (e) {
-            // Fallback: copia solo testo
-            try {
-                await navigator.clipboard.writeText(tsv);
-                btn.textContent = 'Copiato!';
-                setTimeout(() => { btn.textContent = 'Copia righe'; }, 2000);
-            } catch {
-                showToast('Impossibile copiare negli appunti', 'error');
-            }
+        } catch {
+            showToast('Impossibile copiare negli appunti', 'error');
+        } finally {
+            document.body.removeChild(textarea);
         }
     },
 
