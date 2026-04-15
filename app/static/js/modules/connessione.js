@@ -97,7 +97,7 @@ const Connessione = {
                 <p style="text-align:center;color:var(--text-muted);margin-top:12px;">Elaborazione in corso...</p>
             </div>
 
-            <div id="cr-results" style="display:none;"></div>
+            <div id="cr-results" style="display:none;min-width:0;overflow:hidden;"></div>
         `;
 
         this.bindCreaRigaEvents();
@@ -248,7 +248,7 @@ const Connessione = {
                 </div>
             </div>
 
-            <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+            <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;min-width:0;max-width:100%;">
                 <div style="overflow:auto;max-height:260px;">
                     <table id="cr-table" style="border-collapse:collapse;font-size:0.78rem;white-space:nowrap;">
                         <thead>
