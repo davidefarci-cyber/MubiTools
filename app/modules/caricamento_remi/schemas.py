@@ -77,3 +77,51 @@ class RemiConfirmResponse(BaseModel):
     batch_id: str
     inserted: int
     skipped: int
+
+
+# --- Dashboard ---
+
+
+class RemiHistoryItem(BaseModel):
+    """Singolo gruppo di pratiche aggregato per send_batch_id + DL."""
+
+    send_batch_id: str | None
+    vat_number: str
+    company_name: str
+    pec_address: str
+    effective_date: date | None
+    remi_codes: list[str]
+    status: str
+    sent_at: datetime | None = None
+    error_detail: str | None = None
+    practice_ids: list[int]
+
+
+class RemiHistoryResponse(BaseModel):
+    """Risposta paginata per lo storico pratiche."""
+
+    total: int
+    page: int
+    items: list[RemiHistoryItem]
+
+
+class RemiStatsResponse(BaseModel):
+    """Statistiche riepilogative delle pratiche REMI."""
+
+    total_practices: int
+    pending: int
+    sent: int
+    errors: int
+    last_send_date: datetime | None = None
+
+
+class RemiResendRequest(BaseModel):
+    """Richiesta reinvio pratiche in errore."""
+
+    practice_ids: list[int]
+
+
+class RemiResendResponse(BaseModel):
+    """Risposta reinvio pratiche."""
+
+    updated: int

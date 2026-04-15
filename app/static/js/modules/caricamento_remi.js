@@ -9,6 +9,15 @@ const CaricamentoRemi = {
     searchTerm: '',
     matchResults: null,
     matchEffectiveDate: '',
+    // Dashboard state
+    dashboardStats: null,
+    dashboardItems: [],
+    dashboardTotal: 0,
+    dashboardPage: 1,
+    dashboardPageSize: 50,
+    dashboardFilters: { status: '', search: '', date_from: '', date_to: '' },
+    dashboardAutoRefreshTimer: null,
+    dashboardExpandedRows: new Set(),
 
     render(container) {
         this.registry = [];
@@ -35,6 +44,7 @@ const CaricamentoRemi = {
                 tab.style.color = 'var(--accent)';
                 tab.style.fontWeight = '600';
                 tab.style.borderBottomColor = 'var(--accent)';
+                this.stopDashboardAutoRefresh();
                 this.currentTab = tab.dataset.tab;
                 this.renderTab();
             });
@@ -53,11 +63,7 @@ const CaricamentoRemi = {
                 this.renderAnagrafica(content);
                 break;
             case 'dashboard':
-                content.innerHTML = `
-                    <div class="card" style="text-align:center;padding:60px 20px;">
-                        <p style="color:var(--text-muted);font-size:1.1rem;">Dashboard</p>
-                        <p style="color:var(--text-muted);font-size:0.9rem;margin-top:8px;">In arrivo</p>
-                    </div>`;
+                this.renderDashboard(content);
                 break;
         }
     },
@@ -652,6 +658,416 @@ const CaricamentoRemi = {
             } catch (err) {
                 showToast(err.message, 'error');
             }
+        }
+    },
+
+    // --- Dashboard ---
+
+    renderDashboard(container) {
+        this.dashboardExpandedRows = new Set();
+        container.innerHTML = `
+            <div id="dashboard-stats-section">
+                <div style="display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap;">
+                    <div class="card" style="flex:1;min-width:180px;text-align:center;padding:20px;">
+                        <div style="font-size:0.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Totale Pratiche</div>
+                        <div id="stat-total" style="font-size:2rem;font-weight:700;color:var(--text-primary);margin-top:6px;">—</div>
+                    </div>
+                    <div class="card" style="flex:1;min-width:180px;text-align:center;padding:20px;">
+                        <div style="font-size:0.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">In Attesa</div>
+                        <div id="stat-pending" style="font-size:2rem;font-weight:700;color:#ffc107;margin-top:6px;">—</div>
+                    </div>
+                    <div class="card" style="flex:1;min-width:180px;text-align:center;padding:20px;">
+                        <div style="font-size:0.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Inviate</div>
+                        <div id="stat-sent" style="font-size:2rem;font-weight:700;color:var(--accent-green);margin-top:6px;">—</div>
+                    </div>
+                    <div class="card" style="flex:1;min-width:180px;text-align:center;padding:20px;">
+                        <div style="font-size:0.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Errori</div>
+                        <div id="stat-errors" style="font-size:2rem;font-weight:700;color:#dc3545;margin-top:6px;">—</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+                    <span>Storico Pratiche</span>
+                    <span id="dashboard-last-send" style="font-size:0.8rem;font-weight:normal;color:var(--text-muted);"></span>
+                </div>
+                <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-end;">
+                    <div style="display:flex;flex-direction:column;gap:4px;">
+                        <label style="font-size:0.8rem;color:var(--text-muted);">Stato</label>
+                        <select id="dash-filter-status" style="padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.9rem;">
+                            <option value="">Tutti</option>
+                            <option value="pending">In attesa</option>
+                            <option value="sent">Inviati</option>
+                            <option value="error">Errori</option>
+                        </select>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:200px;">
+                        <label style="font-size:0.8rem;color:var(--text-muted);">Ragione Sociale / P.IVA</label>
+                        <input type="text" id="dash-filter-search" placeholder="Cerca..." style="padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.9rem;">
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px;">
+                        <label style="font-size:0.8rem;color:var(--text-muted);">Data decorrenza da</label>
+                        <input type="date" id="dash-filter-date-from" style="padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.9rem;">
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px;">
+                        <label style="font-size:0.8rem;color:var(--text-muted);">Data decorrenza a</label>
+                        <input type="date" id="dash-filter-date-to" style="padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.9rem;">
+                    </div>
+                    <button class="btn btn-sm btn-cancel" id="dash-filter-reset" style="height:38px;">Reimposta filtri</button>
+                </div>
+                <div id="dashboard-table-container">
+                    <div class="spinner" style="margin:30px auto;"></div>
+                </div>
+                <div id="dashboard-pagination" style="margin-top:16px;"></div>
+            </div>`;
+
+        this.bindDashboardFilters();
+        this.loadDashboardData();
+    },
+
+    bindDashboardFilters() {
+        const statusEl = document.getElementById('dash-filter-status');
+        const searchEl = document.getElementById('dash-filter-search');
+        const dateFromEl = document.getElementById('dash-filter-date-from');
+        const dateToEl = document.getElementById('dash-filter-date-to');
+        const resetBtn = document.getElementById('dash-filter-reset');
+
+        // Restore current filter values
+        if (statusEl) statusEl.value = this.dashboardFilters.status;
+        if (searchEl) searchEl.value = this.dashboardFilters.search;
+        if (dateFromEl) dateFromEl.value = this.dashboardFilters.date_from;
+        if (dateToEl) dateToEl.value = this.dashboardFilters.date_to;
+
+        let searchTimeout = null;
+
+        if (statusEl) statusEl.addEventListener('change', () => {
+            this.dashboardFilters.status = statusEl.value;
+            this.dashboardPage = 1;
+            this.loadDashboardHistory();
+        });
+
+        if (searchEl) searchEl.addEventListener('input', () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                this.dashboardFilters.search = searchEl.value.trim();
+                this.dashboardPage = 1;
+                this.loadDashboardHistory();
+            }, 400);
+        });
+
+        if (dateFromEl) dateFromEl.addEventListener('change', () => {
+            this.dashboardFilters.date_from = dateFromEl.value;
+            this.dashboardPage = 1;
+            this.loadDashboardHistory();
+        });
+
+        if (dateToEl) dateToEl.addEventListener('change', () => {
+            this.dashboardFilters.date_to = dateToEl.value;
+            this.dashboardPage = 1;
+            this.loadDashboardHistory();
+        });
+
+        if (resetBtn) resetBtn.addEventListener('click', () => {
+            this.dashboardFilters = { status: '', search: '', date_from: '', date_to: '' };
+            if (statusEl) statusEl.value = '';
+            if (searchEl) searchEl.value = '';
+            if (dateFromEl) dateFromEl.value = '';
+            if (dateToEl) dateToEl.value = '';
+            this.dashboardPage = 1;
+            this.loadDashboardHistory();
+        });
+    },
+
+    async loadDashboardData() {
+        await Promise.all([
+            this.loadDashboardStats(),
+            this.loadDashboardHistory(),
+        ]);
+        this.startDashboardAutoRefresh();
+    },
+
+    async loadDashboardStats() {
+        try {
+            const res = await Auth.apiRequest('/api/caricamento-remi/history/stats');
+            if (!res.ok) throw new Error('Errore caricamento statistiche');
+            this.dashboardStats = await res.json();
+            this.renderDashboardStats();
+        } catch (err) {
+            console.error('Dashboard stats error:', err);
+        }
+    },
+
+    renderDashboardStats() {
+        const s = this.dashboardStats;
+        if (!s) return;
+
+        const totalEl = document.getElementById('stat-total');
+        const pendingEl = document.getElementById('stat-pending');
+        const sentEl = document.getElementById('stat-sent');
+        const errorsEl = document.getElementById('stat-errors');
+        const lastSendEl = document.getElementById('dashboard-last-send');
+
+        if (totalEl) totalEl.textContent = s.total_practices;
+        if (pendingEl) pendingEl.textContent = s.pending;
+        if (sentEl) sentEl.textContent = s.sent;
+        if (errorsEl) errorsEl.textContent = s.errors;
+        if (lastSendEl) {
+            lastSendEl.textContent = s.last_send_date
+                ? `Ultimo invio: ${this.formatDateTime(s.last_send_date)}`
+                : '';
+        }
+    },
+
+    async loadDashboardHistory() {
+        const container = document.getElementById('dashboard-table-container');
+        if (!container) return;
+
+        const params = new URLSearchParams();
+        params.set('page', this.dashboardPage);
+        params.set('page_size', this.dashboardPageSize);
+        if (this.dashboardFilters.status) params.set('status', this.dashboardFilters.status);
+        if (this.dashboardFilters.search) params.set('search', this.dashboardFilters.search);
+        if (this.dashboardFilters.date_from) params.set('date_from', this.dashboardFilters.date_from);
+        if (this.dashboardFilters.date_to) params.set('date_to', this.dashboardFilters.date_to);
+
+        try {
+            const res = await Auth.apiRequest(`/api/caricamento-remi/history?${params.toString()}`);
+            if (!res.ok) throw new Error('Errore caricamento storico');
+            const data = await res.json();
+            this.dashboardItems = data.items;
+            this.dashboardTotal = data.total;
+            this.renderDashboardTable();
+            this.renderDashboardPagination();
+        } catch (err) {
+            container.innerHTML = `<p style="color:var(--accent-red);">${App.escapeHtml(err.message)}</p>`;
+        }
+    },
+
+    renderDashboardTable() {
+        const container = document.getElementById('dashboard-table-container');
+        if (!container) return;
+
+        if (!this.dashboardItems.length) {
+            container.innerHTML = '<p style="color:var(--text-muted);padding:20px 0;">Nessuna pratica trovata.</p>';
+            return;
+        }
+
+        const rows = this.dashboardItems.map((item, idx) => {
+            const isExpanded = this.dashboardExpandedRows.has(idx);
+            const statusBadge = this.getStatusBadge(item.status);
+            const sentAt = item.sent_at ? this.formatDateTime(item.sent_at) : '—';
+            const effectiveDate = item.effective_date || '—';
+            const remiCount = item.remi_codes.length;
+
+            const resendBtn = item.status === 'error'
+                ? `<button class="btn btn-sm btn-primary btn-dash-resend" data-idx="${idx}" style="font-size:0.8rem;">Reinvia</button>`
+                : '';
+
+            const expandIcon = isExpanded ? '&#9660;' : '&#9654;';
+            const rowBg = item.status === 'error' ? 'background:rgba(220,53,69,0.06);' : '';
+
+            let expandedContent = '';
+            if (isExpanded) {
+                const remiList = item.remi_codes.map(c => `<span style="display:inline-block;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;padding:2px 8px;margin:2px 4px 2px 0;font-family:monospace;font-size:0.85rem;">${App.escapeHtml(c)}</span>`).join('');
+                let errorSection = '';
+                if (item.status === 'error' && item.error_detail) {
+                    errorSection = `
+                        <div style="margin-top:10px;padding:10px 14px;background:rgba(220,53,69,0.08);border:1px solid rgba(220,53,69,0.25);border-radius:6px;">
+                            <strong style="color:#dc3545;font-size:0.85rem;">Dettaglio errore:</strong>
+                            <p style="margin-top:4px;font-size:0.85rem;color:var(--text-primary);">${App.escapeHtml(item.error_detail)}</p>
+                        </div>`;
+                }
+                expandedContent = `
+                    <tr class="dash-expanded-row" style="${rowBg}">
+                        <td colspan="7" style="padding:12px 20px;border-top:none;">
+                            <div style="margin-bottom:6px;font-size:0.85rem;color:var(--text-muted);">Codici REMI:</div>
+                            <div style="display:flex;flex-wrap:wrap;">${remiList}</div>
+                            ${errorSection}
+                        </td>
+                    </tr>`;
+            }
+
+            return `
+                <tr style="${rowBg}cursor:pointer;" class="dash-row-toggle" data-idx="${idx}">
+                    <td style="width:24px;color:var(--text-muted);font-size:0.75rem;">${expandIcon}</td>
+                    <td><strong>${App.escapeHtml(item.company_name)}</strong></td>
+                    <td style="font-family:monospace;">${App.escapeHtml(item.vat_number)}</td>
+                    <td>${effectiveDate}</td>
+                    <td>${remiCount}</td>
+                    <td>${statusBadge}</td>
+                    <td>${sentAt}</td>
+                    <td style="text-align:right;">${resendBtn}</td>
+                </tr>
+                ${expandedContent}`;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:24px;"></th>
+                            <th>Ragione Sociale</th>
+                            <th>P.IVA</th>
+                            <th>Data Decorrenza</th>
+                            <th>N° REMI</th>
+                            <th>Stato</th>
+                            <th>Data Invio</th>
+                            <th style="text-align:right;">Azioni</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+
+        this.bindDashboardTableActions();
+    },
+
+    bindDashboardTableActions() {
+        document.querySelectorAll('.dash-row-toggle').forEach(row => {
+            row.addEventListener('click', (e) => {
+                // Don't toggle if clicking a button
+                if (e.target.closest('button')) return;
+                const idx = parseInt(row.dataset.idx);
+                if (this.dashboardExpandedRows.has(idx)) {
+                    this.dashboardExpandedRows.delete(idx);
+                } else {
+                    this.dashboardExpandedRows.add(idx);
+                }
+                this.renderDashboardTable();
+            });
+        });
+
+        document.querySelectorAll('.btn-dash-resend').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(btn.dataset.idx);
+                const item = this.dashboardItems[idx];
+                if (item) this.resendPractices(item);
+            });
+        });
+    },
+
+    async resendPractices(item) {
+        const body = `
+            <p style="line-height:1.5;">
+                Reimpostare <strong>${item.remi_codes.length} pratiche</strong> di
+                <strong>${App.escapeHtml(item.company_name)}</strong> in stato
+                <strong>In attesa</strong> per il reinvio?
+            </p>`;
+
+        showModal('Conferma reinvio', body, [
+            { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+            { label: 'Reinvia', class: 'btn-primary', onClick: async () => {
+                closeModal();
+                try {
+                    const res = await Auth.apiRequest('/api/caricamento-remi/history/resend', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ practice_ids: item.practice_ids }),
+                    });
+                    if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.detail || 'Errore reinvio');
+                    }
+                    const result = await res.json();
+                    showToast(`${result.updated} pratiche reimpostate per il reinvio`, 'success');
+                    this.loadDashboardData();
+                } catch (err) {
+                    showToast(err.message, 'error');
+                }
+            }},
+        ]);
+    },
+
+    renderDashboardPagination() {
+        const container = document.getElementById('dashboard-pagination');
+        if (!container) return;
+
+        const totalPages = Math.ceil(this.dashboardTotal / this.dashboardPageSize);
+        if (totalPages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const pages = [];
+        for (let i = 1; i <= totalPages; i++) {
+            if (i === 1 || i === totalPages || (i >= this.dashboardPage - 2 && i <= this.dashboardPage + 2)) {
+                pages.push(i);
+            } else if (pages[pages.length - 1] !== '...') {
+                pages.push('...');
+            }
+        }
+
+        const buttons = pages.map(p => {
+            if (p === '...') {
+                return `<span style="padding:6px 4px;color:var(--text-muted);">...</span>`;
+            }
+            const isActive = p === this.dashboardPage;
+            const style = isActive
+                ? 'background:var(--accent);color:#fff;border:1px solid var(--accent);'
+                : 'background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);cursor:pointer;';
+            return `<button class="dash-page-btn" data-page="${p}" style="${style}padding:6px 12px;border-radius:4px;font-size:0.85rem;" ${isActive ? 'disabled' : ''}>${p}</button>`;
+        }).join('');
+
+        const showing = Math.min(this.dashboardPage * this.dashboardPageSize, this.dashboardTotal);
+        const from = (this.dashboardPage - 1) * this.dashboardPageSize + 1;
+
+        container.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+                <span style="font-size:0.85rem;color:var(--text-muted);">
+                    ${from}–${showing} di ${this.dashboardTotal} gruppi
+                </span>
+                <div style="display:flex;gap:4px;align-items:center;">${buttons}</div>
+            </div>`;
+
+        container.querySelectorAll('.dash-page-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.dashboardPage = parseInt(btn.dataset.page);
+                this.dashboardExpandedRows = new Set();
+                this.loadDashboardHistory();
+            });
+        });
+    },
+
+    getStatusBadge(status) {
+        switch (status) {
+            case 'pending':
+                return '<span class="badge" style="background:rgba(255,193,7,0.15);color:#d4a017;padding:4px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;">In attesa</span>';
+            case 'sent':
+                return '<span class="badge badge-active" style="padding:4px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;">Inviata</span>';
+            case 'error':
+                return '<span class="badge" style="background:rgba(220,53,69,0.15);color:#dc3545;padding:4px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;">Errore</span>';
+            default:
+                return `<span class="badge" style="padding:4px 10px;border-radius:12px;font-size:0.8rem;">${App.escapeHtml(status)}</span>`;
+        }
+    },
+
+    formatDateTime(isoString) {
+        if (!isoString) return '—';
+        const d = new Date(isoString);
+        return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+            + ' ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    },
+
+    startDashboardAutoRefresh() {
+        this.stopDashboardAutoRefresh();
+        if (this.dashboardStats && this.dashboardStats.pending > 0) {
+            this.dashboardAutoRefreshTimer = setInterval(() => {
+                if (this.currentTab === 'dashboard') {
+                    this.loadDashboardStats();
+                    this.loadDashboardHistory();
+                } else {
+                    this.stopDashboardAutoRefresh();
+                }
+            }, 30000);
+        }
+    },
+
+    stopDashboardAutoRefresh() {
+        if (this.dashboardAutoRefreshTimer) {
+            clearInterval(this.dashboardAutoRefreshTimer);
+            this.dashboardAutoRefreshTimer = null;
         }
     },
 };
