@@ -183,6 +183,9 @@ const Admin = {
                 <div class="form-group">
                     <label><input type="checkbox" id="new-mod-connessione" checked style="width:auto;margin-right:8px;">Connessione</label>
                 </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="new-mod-caricamento-remi" style="width:auto;margin-right:8px;">Caricamento REMI</label>
+                </div>
             </form>`;
 
         showModal('Nuovo Utente', body, [
@@ -199,6 +202,7 @@ const Admin = {
         const modules = [];
         if (document.getElementById('new-mod-incassi').checked) modules.push('incassi_mubi');
         if (document.getElementById('new-mod-connessione').checked) modules.push('connessione');
+        if (document.getElementById('new-mod-caricamento-remi').checked) modules.push('caricamento_remi');
 
         if (!username || !fullName || password.length < 8) {
             showToast('Compilare tutti i campi (password min. 8 caratteri)', 'error');
@@ -250,6 +254,9 @@ const Admin = {
                 <div class="form-group">
                     <label><input type="checkbox" id="edit-mod-connessione" ${modules.includes('connessione') ? 'checked' : ''} style="width:auto;margin-right:8px;">Connessione</label>
                 </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="edit-mod-caricamento-remi" ${modules.includes('caricamento_remi') ? 'checked' : ''} style="width:auto;margin-right:8px;">Caricamento REMI</label>
+                </div>
                 <hr style="border-color:var(--border);margin:16px 0;">
                 <div class="form-group">
                     <label>Nuova Password (lasciare vuoto per non cambiare)</label>
@@ -270,6 +277,7 @@ const Admin = {
         const modules = [];
         if (document.getElementById('edit-mod-incassi').checked) modules.push('incassi_mubi');
         if (document.getElementById('edit-mod-connessione').checked) modules.push('connessione');
+        if (document.getElementById('edit-mod-caricamento-remi').checked) modules.push('caricamento_remi');
 
         try {
             const res = await Auth.apiRequest(`/admin/users/${userId}`, {
