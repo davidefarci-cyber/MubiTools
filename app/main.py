@@ -25,6 +25,7 @@ from app.auth.router import router as auth_router
 from app.admin.router import router as admin_router
 from app.modules.incassi_mubi.router import router as incassi_router
 from app.modules.connessione.router import router as connessione_router
+from app.modules.invio_remi.router import router as invio_remi_router
 from app.admin.service import ensure_admin_exists
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(admin_router, prefix="/admin", tags=["admin"])
 app.include_router(incassi_router, prefix="/api/incassi", tags=["incassi"])
 app.include_router(connessione_router, prefix="/api/connessione", tags=["connessione"])
+app.include_router(invio_remi_router, prefix="/api/invio-remi", tags=["invio-remi"])
 
 # File statici
 static_dir = Path(__file__).parent / "static"

@@ -1,7 +1,8 @@
-"""Router pannello admin: gestione utenti, aggiornamenti, audit log, backup/restore DB."""
+"""Router pannello admin: gestione utenti, aggiornamenti, audit log, backup/restore DB, PEC."""
 
 import logging
 import shutil
+import smtplib
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +17,8 @@ from app.admin import update_service
 from app.auth.dependencies import require_admin
 from app.config import BASE_DIR
 from app.database import Base, SessionLocal, engine, get_db
-from app.models import User, log_audit
+from app.models import PecAccount, User, log_audit
+from app.utils.encryption import decrypt_password, encrypt_password
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,25 @@ class AuditLogOut(BaseModel):
     action: str
     detail: str | None
     timestamp: str | None
+
+
+class CreatePecRequest(BaseModel):
+    """Schema creazione connessione PEC."""
+
+    label: str = Field(min_length=1, max_length=100)
+    email: str = Field(min_length=5, max_length=200)
+    username: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=1)
+
+
+class UpdatePecRequest(BaseModel):
+    """Schema modifica connessione PEC."""
+
+    label: str | None = None
+    email: str | None = None
+    username: str | None = None
+    password: str | None = None
+    is_active: bool | None = None
 
 
 # --- Helpers ---
@@ -201,6 +222,143 @@ def get_audit_log(
             for log in logs
         ],
     }
+
+
+# --- PEC Accounts ---
+
+
+def _pec_to_dict(pec: PecAccount) -> dict:
+    """Converte un PecAccount ORM in dict per la risposta (senza password)."""
+    return {
+        "id": pec.id,
+        "label": pec.label,
+        "email": pec.email,
+        "username": pec.username,
+        "is_active": pec.is_active,
+        "created_at": pec.created_at.isoformat() if pec.created_at else None,
+    }
+
+
+@router.get("/pec")
+def list_pec(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Lista tutte le connessioni PEC configurate (password esclusa)."""
+    accounts = db.query(PecAccount).order_by(PecAccount.id).all()
+    return [_pec_to_dict(p) for p in accounts]
+
+
+@router.post("/pec", status_code=status.HTTP_201_CREATED)
+def create_pec(
+    request: CreatePecRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Crea una nuova connessione PEC."""
+    existing = db.query(PecAccount).filter(PecAccount.email == request.email).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Email PEC '{request.email}' gia' configurata",
+        )
+    pec = PecAccount(
+        label=request.label,
+        email=request.email,
+        username=request.username,
+        encrypted_password=encrypt_password(request.password),
+        is_active=True,
+    )
+    db.add(pec)
+    db.commit()
+    db.refresh(pec)
+    log_audit(db, "pec_created", user_id=admin.id, detail={"email": pec.email, "label": pec.label})
+    return _pec_to_dict(pec)
+
+
+@router.put("/pec/{pec_id}")
+def update_pec(
+    pec_id: int,
+    request: UpdatePecRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Modifica una connessione PEC. Se password e' vuota/null, non viene aggiornata."""
+    pec = db.query(PecAccount).filter(PecAccount.id == pec_id).first()
+    if not pec:
+        raise HTTPException(status_code=404, detail="Connessione PEC non trovata")
+
+    if request.label is not None:
+        pec.label = request.label
+    if request.email is not None:
+        dup = db.query(PecAccount).filter(PecAccount.email == request.email, PecAccount.id != pec_id).first()
+        if dup:
+            raise HTTPException(status_code=409, detail=f"Email PEC '{request.email}' gia' in uso")
+        pec.email = request.email
+    if request.username is not None:
+        pec.username = request.username
+    if request.password and request.password.strip():
+        pec.encrypted_password = encrypt_password(request.password)
+    if request.is_active is not None:
+        pec.is_active = request.is_active
+
+    db.commit()
+    db.refresh(pec)
+    log_audit(db, "pec_updated", user_id=admin.id, detail={"pec_id": pec.id, "email": pec.email})
+    return _pec_to_dict(pec)
+
+
+@router.delete("/pec/{pec_id}")
+def delete_pec(
+    pec_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Elimina una connessione PEC (non se e' l'unica attiva)."""
+    pec = db.query(PecAccount).filter(PecAccount.id == pec_id).first()
+    if not pec:
+        raise HTTPException(status_code=404, detail="Connessione PEC non trovata")
+
+    active_count = db.query(PecAccount).filter(PecAccount.is_active.is_(True)).count()
+    if pec.is_active and active_count <= 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Impossibile eliminare l'unica connessione PEC attiva",
+        )
+
+    email = pec.email
+    db.delete(pec)
+    db.commit()
+    log_audit(db, "pec_deleted", user_id=admin.id, detail={"pec_id": pec_id, "email": email})
+    return {"message": "Connessione PEC eliminata"}
+
+
+@router.post("/pec/{pec_id}/test")
+def test_pec(
+    pec_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Testa la connessione SMTP di un account PEC (login senza invio mail)."""
+    pec = db.query(PecAccount).filter(PecAccount.id == pec_id).first()
+    if not pec:
+        raise HTTPException(status_code=404, detail="Connessione PEC non trovata")
+
+    try:
+        password = decrypt_password(pec.encrypted_password)
+        with smtplib.SMTP_SSL("smtps.aruba.it", 465, timeout=10) as smtp:
+            smtp.login(pec.username, password)
+        log_audit(db, "pec_test_ok", user_id=admin.id, detail={"pec_id": pec.id, "email": pec.email})
+        return {"success": True}
+    except smtplib.SMTPException as exc:
+        log_audit(
+            db, "pec_test_fail", user_id=admin.id,
+            detail={"pec_id": pec.id, "email": pec.email, "error": str(exc)},
+        )
+        return {"success": False, "error": str(exc)}
+    except Exception as exc:
+        logger.exception("Errore test PEC id=%d", pec_id)
+        return {"success": False, "error": str(exc)}
 
 
 # --- Aggiornamenti ---

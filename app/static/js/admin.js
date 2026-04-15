@@ -5,6 +5,7 @@
 
 const Admin = {
     users: [],
+    pecAccounts: [],
     auditPage: 1,
 
     render(container) {
@@ -15,6 +16,15 @@ const Admin = {
                     <button class="btn btn-primary btn-sm" id="btn-add-user">+ Nuovo Utente</button>
                 </div>
                 <div id="admin-users-list">
+                    <div class="spinner" style="margin:20px auto;"></div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    <span>Connessioni PEC</span>
+                    <button class="btn btn-primary btn-sm" id="btn-add-pec">+ Nuova PEC</button>
+                </div>
+                <div id="admin-pec-list">
                     <div class="spinner" style="margin:20px auto;"></div>
                 </div>
             </div>
@@ -53,9 +63,11 @@ const Admin = {
             </div>
         `;
         document.getElementById('btn-add-user').addEventListener('click', () => this.showCreateUserModal());
+        document.getElementById('btn-add-pec').addEventListener('click', () => this.showCreatePecModal());
         document.getElementById('btn-db-backup').addEventListener('click', () => this.downloadBackup());
         document.getElementById('btn-db-restore').addEventListener('click', () => this.showRestoreModal());
         this.loadUsers();
+        this.loadPecAccounts();
         this.loadUpdateInfo();
         this.loadSystemInfo();
         this.loadUpdates();
@@ -321,6 +333,265 @@ const Admin = {
             this.loadUsers();
         } catch (err) {
             showToast(err.message, 'error');
+        }
+    },
+
+    // --- PEC Accounts ---
+
+    async loadPecAccounts() {
+        const container = document.getElementById('admin-pec-list');
+        try {
+            const res = await Auth.apiRequest('/admin/pec');
+            if (!res.ok) throw new Error('Errore caricamento PEC');
+            this.pecAccounts = await res.json();
+            container.innerHTML = this.renderPecTable(this.pecAccounts);
+            this.bindPecActions();
+        } catch (err) {
+            container.innerHTML = `<p style="color:var(--accent-red)">${App.escapeHtml(err.message)}</p>`;
+        }
+    },
+
+    renderPecTable(accounts) {
+        if (!accounts.length) return '<p style="color:var(--text-muted)">Nessuna connessione PEC configurata.</p>';
+
+        const rows = accounts.map(p => {
+            const statusBadge = p.is_active
+                ? '<span class="badge badge-active">Attiva</span>'
+                : '<span class="badge badge-disabled">Disattiva</span>';
+
+            return `
+                <tr>
+                    <td><strong>${App.escapeHtml(p.label)}</strong></td>
+                    <td>${App.escapeHtml(p.email)}</td>
+                    <td>${statusBadge}</td>
+                    <td>
+                        <span id="pec-test-result-${p.id}" style="font-size:0.85rem;"></span>
+                    </td>
+                    <td>
+                        <div style="display:flex;gap:6px;">
+                            <button class="btn btn-sm btn-edit btn-pec-test" data-id="${p.id}" title="Testa Connessione">Testa</button>
+                            <button class="btn btn-sm btn-edit btn-pec-edit" data-id="${p.id}" title="Modifica">Modifica</button>
+                            <button class="btn btn-sm btn-warn btn-pec-delete" data-id="${p.id}" title="Elimina">Elimina</button>
+                        </div>
+                    </td>
+                </tr>`;
+        }).join('');
+
+        return `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Etichetta</th>
+                            <th>Email</th>
+                            <th>Stato</th>
+                            <th>Test</th>
+                            <th>Azioni</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+    },
+
+    bindPecActions() {
+        document.querySelectorAll('.btn-pec-test').forEach(btn => {
+            btn.addEventListener('click', () => this.testPec(parseInt(btn.dataset.id)));
+        });
+        document.querySelectorAll('.btn-pec-edit').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const pec = this.pecAccounts.find(p => p.id === parseInt(btn.dataset.id));
+                if (pec) this.showEditPecModal(pec);
+            });
+        });
+        document.querySelectorAll('.btn-pec-delete').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const pec = this.pecAccounts.find(p => p.id === parseInt(btn.dataset.id));
+                if (pec) this.confirmDeletePec(pec);
+            });
+        });
+    },
+
+    showCreatePecModal() {
+        const body = `
+            <form id="create-pec-form">
+                <div class="form-group">
+                    <label>Etichetta</label>
+                    <input type="text" id="pec-label" required placeholder="Es: PEC Principale">
+                </div>
+                <div class="form-group">
+                    <label>Email PEC</label>
+                    <input type="email" id="pec-email" required placeholder="esempio@pec.it">
+                </div>
+                <div class="form-group">
+                    <label>Username SMTP</label>
+                    <input type="text" id="pec-username" required placeholder="username@pec.it">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="pec-password" required autocomplete="new-password">
+                </div>
+                <div style="background:var(--bg-tertiary);border-radius:var(--radius);padding:12px;margin-top:12px;">
+                    <p style="color:var(--text-muted);font-size:0.85rem;margin:0;">
+                        <strong>Parametri SMTP (fissi):</strong> smtps.aruba.it : 465 (SSL)
+                    </p>
+                </div>
+            </form>`;
+
+        showModal('Nuova Connessione PEC', body, [
+            { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+            { label: 'Crea PEC', class: 'btn-primary', onClick: () => this.createPec() },
+        ]);
+    },
+
+    async createPec() {
+        const label = document.getElementById('pec-label').value.trim();
+        const email = document.getElementById('pec-email').value.trim();
+        const username = document.getElementById('pec-username').value.trim();
+        const password = document.getElementById('pec-password').value;
+
+        if (!label || !email || !username || !password) {
+            showToast('Compilare tutti i campi', 'error');
+            return;
+        }
+
+        try {
+            const res = await Auth.apiRequest('/admin/pec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ label, email, username, password })
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore creazione PEC');
+            }
+            closeModal();
+            showToast('Connessione PEC creata con successo', 'success');
+            this.loadPecAccounts();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    },
+
+    showEditPecModal(pec) {
+        const body = `
+            <form id="edit-pec-form">
+                <div class="form-group">
+                    <label>Etichetta</label>
+                    <input type="text" id="edit-pec-label" value="${App.escapeHtml(pec.label)}" required>
+                </div>
+                <div class="form-group">
+                    <label>Email PEC</label>
+                    <input type="email" id="edit-pec-email" value="${App.escapeHtml(pec.email)}" required>
+                </div>
+                <div class="form-group">
+                    <label>Username SMTP</label>
+                    <input type="text" id="edit-pec-username" value="${App.escapeHtml(pec.username)}" required>
+                </div>
+                <div class="form-group">
+                    <label>Password (lasciare vuoto per non cambiare)</label>
+                    <input type="password" id="edit-pec-password" autocomplete="new-password" placeholder="Lasciare vuoto = non cambiare">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="edit-pec-active" ${pec.is_active ? 'checked' : ''} style="width:auto;margin-right:8px;">
+                        Attiva
+                    </label>
+                </div>
+                <div style="background:var(--bg-tertiary);border-radius:var(--radius);padding:12px;margin-top:12px;">
+                    <p style="color:var(--text-muted);font-size:0.85rem;margin:0;">
+                        <strong>Parametri SMTP (fissi):</strong> smtps.aruba.it : 465 (SSL)
+                    </p>
+                </div>
+            </form>`;
+
+        showModal(`Modifica PEC: ${pec.label}`, body, [
+            { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+            { label: 'Salva', class: 'btn-primary', onClick: () => this.savePec(pec.id) },
+        ]);
+    },
+
+    async savePec(pecId) {
+        const label = document.getElementById('edit-pec-label').value.trim();
+        const email = document.getElementById('edit-pec-email').value.trim();
+        const username = document.getElementById('edit-pec-username').value.trim();
+        const password = document.getElementById('edit-pec-password').value;
+        const isActive = document.getElementById('edit-pec-active').checked;
+
+        if (!label || !email || !username) {
+            showToast('Compilare etichetta, email e username', 'error');
+            return;
+        }
+
+        const payload = { label, email, username, is_active: isActive };
+        if (password) payload.password = password;
+
+        try {
+            const res = await Auth.apiRequest(`/admin/pec/${pecId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore aggiornamento PEC');
+            }
+            closeModal();
+            showToast('Connessione PEC aggiornata', 'success');
+            this.loadPecAccounts();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    },
+
+    confirmDeletePec(pec) {
+        showModal(
+            'Conferma eliminazione',
+            `<p>Vuoi eliminare la connessione PEC <strong>${App.escapeHtml(pec.label)}</strong> (${App.escapeHtml(pec.email)})?</p>`,
+            [
+                { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+                { label: 'Elimina', class: 'btn-danger', onClick: () => this.deletePec(pec.id) },
+            ]
+        );
+    },
+
+    async deletePec(pecId) {
+        try {
+            const res = await Auth.apiRequest(`/admin/pec/${pecId}`, { method: 'DELETE' });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore eliminazione PEC');
+            }
+            closeModal();
+            showToast('Connessione PEC eliminata', 'success');
+            this.loadPecAccounts();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    },
+
+    async testPec(pecId) {
+        const resultSpan = document.getElementById(`pec-test-result-${pecId}`);
+        if (resultSpan) {
+            resultSpan.innerHTML = '<span style="color:var(--text-muted)">Test in corso...</span>';
+        }
+
+        try {
+            const res = await Auth.apiRequest(`/admin/pec/${pecId}/test`, { method: 'POST' });
+            if (!res.ok) throw new Error('Errore durante il test');
+            const data = await res.json();
+
+            if (resultSpan) {
+                if (data.success) {
+                    resultSpan.innerHTML = '<span style="color:var(--accent-green);font-weight:600;">&#10003; Connesso</span>';
+                } else {
+                    resultSpan.innerHTML = `<span style="color:var(--accent-red);font-weight:600;">&#10007; ${App.escapeHtml(data.error || 'Errore')}</span>`;
+                }
+            }
+        } catch (err) {
+            if (resultSpan) {
+                resultSpan.innerHTML = `<span style="color:var(--accent-red);">&#10007; ${App.escapeHtml(err.message)}</span>`;
+            }
         }
     },
 
