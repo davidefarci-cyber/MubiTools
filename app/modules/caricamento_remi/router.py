@@ -1,7 +1,8 @@
-"""Router API per il modulo Caricamento REMI — Anagrafica DL."""
+"""Router API per il modulo Caricamento REMI — Anagrafica DL e caricamento pratiche."""
 
 import logging
 import re
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +15,10 @@ from app.modules.caricamento_remi.schemas import (
     DlRegistryCreate,
     DlRegistryOut,
     DlRegistryUpdate,
+    RemiConfirmRequest,
+    RemiConfirmResponse,
+    RemiMatchResult,
+    RemiMatchRow,
 )
 from app.modules.caricamento_remi.service import validate_partita_iva
 
@@ -227,3 +232,108 @@ def reactivate_registry(
 
     logger.info("DL riattivato: id=%d da %s", dl.id, current_user.username)
     return dl
+
+
+# --- Caricamento pratiche REMI ---
+
+
+@router.post("/match", response_model=list[RemiMatchResult])
+def match_practices(
+    rows: list[RemiMatchRow],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[RemiMatchResult]:
+    """Esegue il match delle P.IVA contro l'anagrafica distributori attivi."""
+    _require_module(current_user)
+
+    results: list[RemiMatchResult] = []
+    for row in rows:
+        vat = row.vat_number.strip()
+        dl = (
+            db.query(DlRegistry)
+            .filter(DlRegistry.vat_number == vat, DlRegistry.is_active.is_(True))
+            .first()
+        )
+        if dl:
+            results.append(
+                RemiMatchResult(
+                    vat_number=vat,
+                    remi_code=row.remi_code.strip(),
+                    matched=True,
+                    company_name=dl.company_name,
+                    pec_address=dl.pec_address,
+                )
+            )
+        else:
+            results.append(
+                RemiMatchResult(
+                    vat_number=vat,
+                    remi_code=row.remi_code.strip(),
+                    matched=False,
+                    company_name=None,
+                    pec_address=None,
+                )
+            )
+
+    logger.info(
+        "Match pratiche: %d righe, %d trovate — utente %s",
+        len(rows),
+        sum(1 for r in results if r.matched),
+        current_user.username,
+    )
+    return results
+
+
+@router.post("/confirm", response_model=RemiConfirmResponse)
+def confirm_practices(
+    data: RemiConfirmRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> RemiConfirmResponse:
+    """Conferma e inserisce le pratiche REMI nel database."""
+    _require_module(current_user)
+
+    batch_id = str(uuid.uuid4())
+    inserted = 0
+    skipped = 0
+
+    for row in data.rows:
+        # Ignora righe senza company_name (non matched)
+        if not row.company_name:
+            skipped += 1
+            continue
+
+        practice = RemiPractice(
+            vat_number=row.vat_number.strip(),
+            company_name=row.company_name.strip(),
+            pec_address=row.pec_address.strip(),
+            remi_code=row.remi_code.strip(),
+            effective_date=data.effective_date,
+            status="pending",
+            batch_id=batch_id,
+        )
+        db.add(practice)
+        inserted += 1
+
+    db.commit()
+
+    log_audit(
+        db,
+        "remi_practices_loaded",
+        user_id=current_user.id,
+        detail={
+            "batch_id": batch_id,
+            "inserted": inserted,
+            "skipped": skipped,
+            "effective_date": str(data.effective_date),
+        },
+    )
+
+    logger.info(
+        "Pratiche REMI caricate: batch=%s, inserite=%d, saltate=%d — utente %s",
+        batch_id,
+        inserted,
+        skipped,
+        current_user.username,
+    )
+    return RemiConfirmResponse(batch_id=batch_id, inserted=inserted, skipped=skipped)

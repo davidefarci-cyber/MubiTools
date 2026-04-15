@@ -1,6 +1,6 @@
-"""Pydantic models per il modulo Caricamento REMI — Anagrafica DL."""
+"""Pydantic models per il modulo Caricamento REMI — Anagrafica DL e Caricamento pratiche."""
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -33,3 +33,47 @@ class DlRegistryOut(BaseModel):
     updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+# --- Caricamento pratiche REMI ---
+
+
+class RemiMatchRow(BaseModel):
+    """Singola riga di input per il match P.IVA."""
+
+    vat_number: str
+    remi_code: str
+
+
+class RemiMatchResult(BaseModel):
+    """Risultato match per una singola riga."""
+
+    vat_number: str
+    remi_code: str
+    matched: bool
+    company_name: str | None = None
+    pec_address: str | None = None
+
+
+class RemiConfirmRow(BaseModel):
+    """Singola riga confermata per inserimento pratica."""
+
+    vat_number: str
+    remi_code: str
+    company_name: str
+    pec_address: str
+
+
+class RemiConfirmRequest(BaseModel):
+    """Richiesta conferma inserimento pratiche REMI."""
+
+    effective_date: date
+    rows: list[RemiConfirmRow]
+
+
+class RemiConfirmResponse(BaseModel):
+    """Risposta conferma inserimento pratiche REMI."""
+
+    batch_id: str
+    inserted: int
+    skipped: int
