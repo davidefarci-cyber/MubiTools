@@ -1,6 +1,7 @@
 """Router autenticazione: login, logout, profilo utente."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -10,6 +11,7 @@ from app.admin.service import verify_password
 from app.auth.dependencies import get_current_user
 from app.auth.jwt import create_access_token
 from app.auth.rate_limit import RateLimitExceeded, check_rate_limit
+from app.config import BASE_DIR, settings
 from app.database import get_db
 from app.models import User, log_audit
 
@@ -101,3 +103,25 @@ def get_me(current_user: User = Depends(get_current_user)) -> UserProfile:
         role=current_user.role,
         allowed_modules=current_user.get_modules(),
     )
+
+
+@router.get("/first-boot")
+def check_first_boot(db: Session = Depends(get_db)) -> dict:
+    """Controlla se il sistema e' al primo avvio (password admin di default).
+
+    Restituisce anche se esistono backup da ripristinare.
+    """
+    admin = db.query(User).filter(User.username == settings.ADMIN_USERNAME).first()
+    is_first_boot = False
+    if admin is not None:
+        is_first_boot = verify_password(settings.ADMIN_PASSWORD, admin.hashed_password)
+
+    backups_dir = BASE_DIR / "data" / "backups"
+    has_backups = False
+    if backups_dir.exists():
+        has_backups = any(backups_dir.glob("*.db"))
+
+    return {
+        "is_first_boot": is_first_boot,
+        "has_backups": has_backups,
+    }

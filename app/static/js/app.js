@@ -11,7 +11,22 @@ const App = {
         if (Auth.isLoggedIn()) {
             this.showApp();
         } else {
+            // Controlla primo avvio prima di mostrare il login
+            await this.checkFirstBoot();
             this.showLogin();
+        }
+    },
+
+    firstBootData: null,
+
+    async checkFirstBoot() {
+        try {
+            const res = await fetch('/auth/first-boot');
+            if (res.ok) {
+                this.firstBootData = await res.json();
+            }
+        } catch {
+            // Ignora errori, procedi normalmente
         }
     },
 
@@ -21,13 +36,144 @@ const App = {
         this.bindLoginForm();
     },
 
-    showApp() {
+    async showApp() {
         document.getElementById('login-page').style.display = 'none';
         document.getElementById('app-layout').style.display = 'flex';
         this.setupSidebar();
         this.setupLogout();
         this.loadVersion();
-        this.navigate('dashboard');
+
+        // Controlla se e' il primo avvio (password admin di default)
+        if (Auth.isAdmin()) {
+            try {
+                const res = await Auth.apiRequest('/auth/first-boot');
+                if (res && res.ok) {
+                    this.firstBootData = await res.json();
+                }
+            } catch { /* ignore */ }
+        }
+
+        if (this.firstBootData && this.firstBootData.is_first_boot && Auth.isAdmin()) {
+            this.showFirstBootWizard();
+        } else {
+            this.navigate('dashboard');
+        }
+    },
+
+    showFirstBootWizard() {
+        const content = document.getElementById('main-content');
+        const breadcrumb = document.getElementById('breadcrumb');
+        breadcrumb.textContent = 'Primo Avvio';
+
+        let restoreSection = '';
+        if (this.firstBootData && this.firstBootData.has_backups) {
+            restoreSection = `
+                <div class="card" style="margin-top:20px;border:1px solid var(--accent-amber);">
+                    <div class="card-title" style="color:var(--accent-amber);">Ripristina da backup precedente</div>
+                    <p style="color:var(--text-muted);margin-bottom:16px;">
+                        Sono stati trovati backup precedenti nella cartella di sistema.
+                        Puoi ripristinare un backup per recuperare dati da un'installazione precedente.
+                    </p>
+                    <button class="btn btn-sm btn-warn" id="btn-wizard-restore">Vai a Ripristina Backup</button>
+                </div>`;
+        }
+
+        content.innerHTML = `
+            <div class="card" style="max-width:700px;margin:40px auto;">
+                <div style="text-align:center;margin-bottom:24px;">
+                    <h2 style="color:var(--text-primary);margin-bottom:8px;">Installazione completata</h2>
+                    <p style="color:var(--accent-amber);font-weight:600;font-size:1.05rem;">
+                        Stai usando le credenziali di default: cambia la password admin prima di procedere.
+                    </p>
+                </div>
+                <div style="background:var(--bg-tertiary);border-radius:var(--radius);padding:20px;margin-bottom:20px;">
+                    <p style="color:var(--text-muted);margin-bottom:12px;">Per la sicurezza del sistema, cambia subito la password dell'account amministratore.</p>
+                    <button class="btn btn-primary" id="btn-wizard-change-pw">Cambia Password Admin</button>
+                </div>
+                <div style="text-align:center;">
+                    <button class="btn btn-sm" id="btn-wizard-skip" style="background:var(--bg-tertiary);color:var(--text-muted);">Continua senza cambiare (sconsigliato)</button>
+                </div>
+                ${restoreSection}
+            </div>`;
+
+        document.getElementById('btn-wizard-change-pw').addEventListener('click', () => {
+            this.showChangePasswordModal();
+        });
+        document.getElementById('btn-wizard-skip').addEventListener('click', () => {
+            this.firstBootData = null;
+            this.navigate('dashboard');
+        });
+        const restoreBtn = document.getElementById('btn-wizard-restore');
+        if (restoreBtn) {
+            restoreBtn.addEventListener('click', () => {
+                this.firstBootData = null;
+                this.navigate('admin');
+                // Apri la modale di restore dopo un breve delay per dare tempo al render
+                setTimeout(() => Admin.showRestoreModal(), 500);
+            });
+        }
+    },
+
+    showChangePasswordModal() {
+        const user = Auth.getUser();
+        const body = `
+            <form id="wizard-pw-form">
+                <div class="form-group">
+                    <label>Nuova Password (min. 8 caratteri)</label>
+                    <input type="password" id="wizard-new-pw" required minlength="8" autocomplete="new-password" placeholder="Inserisci la nuova password">
+                </div>
+                <div class="form-group">
+                    <label>Conferma Password</label>
+                    <input type="password" id="wizard-confirm-pw" required minlength="8" autocomplete="new-password" placeholder="Ripeti la nuova password">
+                </div>
+            </form>`;
+
+        showModal('Cambia Password Admin', body, [
+            { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+            { label: 'Salva Password', class: 'btn-primary', onClick: () => this.executePasswordChange() },
+        ]);
+    },
+
+    async executePasswordChange() {
+        const newPw = document.getElementById('wizard-new-pw').value;
+        const confirmPw = document.getElementById('wizard-confirm-pw').value;
+
+        if (newPw.length < 8) {
+            showToast('La password deve avere almeno 8 caratteri', 'error');
+            return;
+        }
+        if (newPw !== confirmPw) {
+            showToast('Le password non coincidono', 'error');
+            return;
+        }
+
+        try {
+            // Trova l'ID dell'admin corrente
+            const usersRes = await Auth.apiRequest('/admin/users');
+            if (!usersRes.ok) throw new Error('Errore caricamento utenti');
+            const users = await usersRes.json();
+            const currentUser = Auth.getUser();
+            const admin = users.find(u => u.username === currentUser.username);
+            if (!admin) throw new Error('Utente admin non trovato');
+
+            const res = await Auth.apiRequest(`/admin/users/${admin.id}/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_password: newPw }),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore cambio password');
+            }
+
+            closeModal();
+            showToast('Password cambiata con successo! Effettua nuovamente il login.', 'success');
+            this.firstBootData = null;
+            // Forza re-login con la nuova password
+            setTimeout(() => Auth.logout(), 2000);
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
     },
 
     bindLoginForm() {
