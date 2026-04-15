@@ -198,7 +198,9 @@ echo [%date% %time%] STEP 5 OK - .env configurato >> "%LOG_FILE%"
 REM ─── STEP 6: Creazione struttura cartelle ───────────────────
 echo.
 echo [STEP 6/13] Creazione cartelle...
+if not exist "%INSTALL_DIR%\data" mkdir "%INSTALL_DIR%\data"
 if not exist "%INSTALL_DIR%\data\uploads" mkdir "%INSTALL_DIR%\data\uploads"
+if not exist "%INSTALL_DIR%\data\backups" mkdir "%INSTALL_DIR%\data\backups"
 if not exist "%INSTALL_DIR%\database" mkdir "%INSTALL_DIR%\database"
 if not exist "%INSTALL_DIR%\logs" mkdir "%INSTALL_DIR%\logs"
 echo   OK - Cartelle create
@@ -296,11 +298,22 @@ echo   Tentativo !ATTEMPTS!/15...
 goto wait_loop
 
 :step12
-REM ─── STEP 12: Primo avvio database ──────────────────────────
+REM ─── STEP 12: Primo avvio database e chiave cifratura ───────
 echo.
-echo [STEP 12/13] Database...
+echo [STEP 12/13] Database e chiave cifratura...
 echo   Il database e l'utente admin vengono creati automaticamente al primo avvio.
-echo [%date% %time%] STEP 12 OK - Database auto-init >> "%LOG_FILE%"
+if not exist "%INSTALL_DIR%\data\secret.key" (
+    echo   Generazione chiave cifratura Fernet...
+    "%INSTALL_DIR%\venv\Scripts\python.exe" -c "from app.utils.encryption import _get_fernet; _get_fernet()" 2>>"%LOG_FILE%"
+    if exist "%INSTALL_DIR%\data\secret.key" (
+        echo   OK - Chiave cifratura generata in data\secret.key
+    ) else (
+        echo   ATTENZIONE: Chiave cifratura verra' generata al primo avvio dell'app.
+    )
+) else (
+    echo   Chiave cifratura esistente, mantenuta.
+)
+echo [%date% %time%] STEP 12 OK - Database auto-init + secret.key >> "%LOG_FILE%"
 
 REM ─── STEP 13: Riepilogo finale ──────────────────────────────
 echo.

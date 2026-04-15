@@ -19,6 +19,15 @@ const Admin = {
                 </div>
             </div>
             <div class="card">
+                <div class="card-title">Gestione Database</div>
+                <div id="admin-db-management">
+                    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+                        <button class="btn btn-primary btn-sm" id="btn-db-backup">Scarica Backup</button>
+                        <button class="btn btn-sm btn-warn" id="btn-db-restore">Ripristina Backup</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
                 <div class="card-title">Aggiornamenti Software</div>
                 <div id="admin-updates">
                     <div class="spinner" style="margin:20px auto;"></div>
@@ -44,6 +53,8 @@ const Admin = {
             </div>
         `;
         document.getElementById('btn-add-user').addEventListener('click', () => this.showCreateUserModal());
+        document.getElementById('btn-db-backup').addEventListener('click', () => this.downloadBackup());
+        document.getElementById('btn-db-restore').addEventListener('click', () => this.showRestoreModal());
         this.loadUsers();
         this.loadUpdateInfo();
         this.loadSystemInfo();
@@ -653,6 +664,123 @@ const Admin = {
             if (nextBtn) nextBtn.addEventListener('click', () => this.loadAuditLog(page + 1));
         } catch (err) {
             container.innerHTML = `<p style="color:var(--accent-red)">${App.escapeHtml(err.message)}</p>`;
+        }
+    },
+
+    // --- Database Backup / Restore ---
+
+    async downloadBackup() {
+        try {
+            const res = await Auth.apiRequest('/admin/db/backup');
+            if (!res.ok) throw new Error('Errore durante il backup');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const disposition = res.headers.get('content-disposition') || '';
+            const match = disposition.match(/filename="?([^"]+)"?/);
+            a.download = match ? match[1] : 'mubi_backup.db';
+            a.href = url;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            showToast('Backup scaricato con successo', 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    },
+
+    showRestoreModal() {
+        const body = `
+            <p style="color:var(--accent-amber);margin-bottom:16px;font-weight:600;">
+                Questa operazione sovrascrive il database corrente. Assicurati di avere un backup recente.
+            </p>
+            <div id="restore-drop-zone" style="border:2px dashed var(--border);border-radius:var(--radius);padding:40px 20px;text-align:center;cursor:pointer;transition:border-color 0.2s,background 0.2s;">
+                <p style="color:var(--text-muted);margin-bottom:8px;">Trascina qui il file .db oppure clicca per selezionarlo</p>
+                <input type="file" id="restore-file-input" accept=".db" style="display:none;">
+                <p id="restore-file-name" style="color:var(--text-primary);font-weight:600;margin-top:8px;display:none;"></p>
+            </div>
+            <div id="restore-progress" style="display:none;margin-top:16px;text-align:center;">
+                <div class="spinner" style="margin:10px auto;"></div>
+                <p style="color:var(--text-muted);">Ripristino in corso...</p>
+            </div>`;
+
+        showModal('Ripristina Database', body, [
+            { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+            { label: 'Ripristina', class: 'btn-danger', onClick: () => this.executeRestore() },
+        ]);
+
+        const dropZone = document.getElementById('restore-drop-zone');
+        const fileInput = document.getElementById('restore-file-input');
+        const fileName = document.getElementById('restore-file-name');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = 'var(--accent)';
+            dropZone.style.background = 'var(--bg-tertiary)';
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.style.borderColor = 'var(--border)';
+            dropZone.style.background = 'transparent';
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = 'var(--border)';
+            dropZone.style.background = 'transparent';
+            if (e.dataTransfer.files.length > 0) {
+                fileInput.files = e.dataTransfer.files;
+                fileName.textContent = e.dataTransfer.files[0].name;
+                fileName.style.display = 'block';
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                fileName.textContent = fileInput.files[0].name;
+                fileName.style.display = 'block';
+            }
+        });
+    },
+
+    async executeRestore() {
+        const fileInput = document.getElementById('restore-file-input');
+        if (!fileInput || !fileInput.files.length) {
+            showToast('Seleziona un file .db da ripristinare', 'error');
+            return;
+        }
+
+        const file = fileInput.files[0];
+        if (!file.name.endsWith('.db')) {
+            showToast('Il file deve avere estensione .db', 'error');
+            return;
+        }
+
+        const progress = document.getElementById('restore-progress');
+        if (progress) progress.style.display = 'block';
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            const res = await Auth.apiRequest('/admin/db/restore', {
+                method: 'POST',
+                body: formData,
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore durante il ripristino');
+            }
+            const data = await res.json();
+            closeModal();
+            showToast(`Database ripristinato. Backup automatico: ${data.auto_backup}`, 'success');
+            // Ricarica la pagina per riflettere il nuovo DB
+            setTimeout(() => window.location.reload(), 1500);
+        } catch (err) {
+            if (progress) progress.style.display = 'none';
+            showToast(err.message, 'error');
         }
     }
 };
