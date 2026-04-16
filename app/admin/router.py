@@ -346,7 +346,7 @@ def test_pec(
 
     try:
         password = decrypt_password(pec.encrypted_password)
-        with smtplib.SMTP_SSL("smtps.aruba.it", 465, timeout=10) as smtp:
+        with smtplib.SMTP_SSL("smtps.pec.aruba.it", 465, timeout=10) as smtp:
             smtp.login(pec.username, password)
         log_audit(db, "pec_test_ok", user_id=admin.id, detail={"pec_id": pec.id, "email": pec.email})
         return {"success": True}
