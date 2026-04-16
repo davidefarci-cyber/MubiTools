@@ -30,14 +30,14 @@ async def send_pec(
     *,
     db: Session,
 ) -> dict:
-    """Invia una PEC con allegato (PDF o DOCX) tramite SMTP Aruba.
+    """Invia una PEC con allegato PDF tramite SMTP Aruba.
 
     Args:
         pec_account_id: ID dell'account PEC da usare.
         to_address: Indirizzo email destinatario.
         subject: Oggetto dell'email.
         body: Corpo dell'email (testo semplice).
-        attachment: Contenuto binario del file da allegare (PDF o DOCX).
+        attachment: Contenuto binario del PDF da allegare.
         attachment_filename: Nome del file allegato.
         db: Sessione database per recuperare l'account PEC.
 
@@ -63,13 +63,8 @@ async def send_pec(
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-    # Allega il file (PDF o DOCX)
-    if attachment_filename.lower().endswith(".docx"):
-        mime_sub = "vnd.openxmlformats-officedocument.wordprocessingml.document"
-    else:
-        mime_sub = "pdf"
-
-    file_part = MIMEBase("application", mime_sub)
+    # Allega il PDF
+    file_part = MIMEBase("application", "pdf")
     file_part.set_payload(attachment)
     encoders.encode_base64(file_part)
     file_part.add_header(

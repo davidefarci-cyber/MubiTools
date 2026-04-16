@@ -244,7 +244,7 @@ async def send_all(
                 yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'generating_pdf'})}\n\n"
 
                 try:
-                    file_bytes, file_format = await generate_pdf(
+                    file_bytes = await generate_pdf(
                         company_name=company_name,
                         pec_address=pec_address,
                         effective_date=effective_date,
@@ -279,8 +279,7 @@ async def send_all(
                     body = body.replace("<PEC_DL>", pec_address)
                     body = body.replace("<DATA_DECORRENZA>", formatted_date)
 
-                    file_ext = "pdf" if file_format == "pdf" else "docx"
-                    attachment_filename = f"REMI_{vat_number}.{file_ext}"
+                    attachment_filename = f"REMI_{vat_number}.pdf"
 
                     result = await email_service.send_pec(
                         pec_account_id=pec_account_id,
