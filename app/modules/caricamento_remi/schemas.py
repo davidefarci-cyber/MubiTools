@@ -13,6 +13,32 @@ class DlRegistryCreate(BaseModel):
     pec_address: str = Field(min_length=1, max_length=500)
 
 
+class DlRegistryBulkRow(BaseModel):
+    """Singola riga per il caricamento massivo distributori."""
+
+    company_name: str
+    vat_number: str
+    pec_address: str
+
+
+class DlRegistryBulkResultRow(BaseModel):
+    """Risultato validazione singola riga del caricamento massivo."""
+
+    company_name: str
+    vat_number: str
+    pec_address: str
+    valid: bool
+    error: str | None = None
+
+
+class DlRegistryBulkResponse(BaseModel):
+    """Risposta inserimento massivo distributori."""
+
+    created: int
+    skipped: int
+    errors: list[DlRegistryBulkResultRow]
+
+
 class DlRegistryUpdate(BaseModel):
     """Richiesta modifica distributore locale."""
 
