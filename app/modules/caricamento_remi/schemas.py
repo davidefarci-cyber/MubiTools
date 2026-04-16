@@ -112,6 +112,7 @@ class RemiStatsResponse(BaseModel):
     pending: int
     sent: int
     errors: int
+    cancelled: int
     last_send_date: datetime | None = None
 
 
@@ -123,5 +124,18 @@ class RemiResendRequest(BaseModel):
 
 class RemiResendResponse(BaseModel):
     """Risposta reinvio pratiche."""
+
+    updated: int
+
+
+class RemiChangeStatusRequest(BaseModel):
+    """Richiesta cambio stato pratiche."""
+
+    practice_ids: list[int]
+    new_status: str
+
+
+class RemiChangeStatusResponse(BaseModel):
+    """Risposta cambio stato pratiche."""
 
     updated: int

@@ -682,6 +682,10 @@ const CaricamentoRemi = {
                         <div id="stat-sent" style="font-size:2rem;font-weight:700;color:var(--accent-green);margin-top:6px;">—</div>
                     </div>
                     <div class="card" style="flex:1;min-width:180px;text-align:center;padding:20px;">
+                        <div style="font-size:0.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Annullate</div>
+                        <div id="stat-cancelled" style="font-size:2rem;font-weight:700;color:#e67e22;margin-top:6px;">—</div>
+                    </div>
+                    <div class="card" style="flex:1;min-width:180px;text-align:center;padding:20px;">
                         <div style="font-size:0.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Errori</div>
                         <div id="stat-errors" style="font-size:2rem;font-weight:700;color:#dc3545;margin-top:6px;">—</div>
                     </div>
@@ -699,6 +703,7 @@ const CaricamentoRemi = {
                             <option value="">Tutti</option>
                             <option value="pending">In attesa</option>
                             <option value="sent">Inviati</option>
+                            <option value="cancelled">Annullati</option>
                             <option value="error">Errori</option>
                         </select>
                     </div>
@@ -805,12 +810,14 @@ const CaricamentoRemi = {
         const totalEl = document.getElementById('stat-total');
         const pendingEl = document.getElementById('stat-pending');
         const sentEl = document.getElementById('stat-sent');
+        const cancelledEl = document.getElementById('stat-cancelled');
         const errorsEl = document.getElementById('stat-errors');
         const lastSendEl = document.getElementById('dashboard-last-send');
 
         if (totalEl) totalEl.textContent = s.total_practices;
         if (pendingEl) pendingEl.textContent = s.pending;
         if (sentEl) sentEl.textContent = s.sent;
+        if (cancelledEl) cancelledEl.textContent = s.cancelled;
         if (errorsEl) errorsEl.textContent = s.errors;
         if (lastSendEl) {
             lastSendEl.textContent = s.last_send_date
@@ -860,12 +867,21 @@ const CaricamentoRemi = {
             const effectiveDate = item.effective_date || '—';
             const remiCount = item.remi_codes.length;
 
-            const resendBtn = item.status === 'error'
-                ? `<button class="btn btn-sm btn-primary btn-dash-resend" data-idx="${idx}" style="font-size:0.8rem;">Reinvia</button>`
-                : '';
+            // Pulsanti azione in base allo stato
+            let actionBtns = '';
+            const btnStyle = 'width:28px;height:28px;padding:0;border:none;border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:700;line-height:1;';
+            if (item.status === 'pending') {
+                actionBtns = `<button class="btn-status-change" data-idx="${idx}" data-new-status="cancelled" style="${btnStyle}background:rgba(220,53,69,0.15);color:#dc3545;" title="Annulla">&#10005;</button>`;
+            } else if (item.status === 'cancelled') {
+                actionBtns = `<button class="btn-status-change" data-idx="${idx}" data-new-status="pending" style="${btnStyle}background:rgba(255,193,7,0.2);color:#d4a017;" title="Rimetti in attesa">&#8634;</button>`;
+            } else if (item.status === 'sent') {
+                actionBtns = `<button class="btn-status-change" data-idx="${idx}" data-new-status="pending" style="${btnStyle}background:rgba(255,193,7,0.2);color:#d4a017;" title="Rimetti in attesa">&#8634;</button>`;
+            } else if (item.status === 'error') {
+                actionBtns = `<button class="btn btn-sm btn-primary btn-dash-resend" data-idx="${idx}" style="font-size:0.8rem;">Reinvia</button>`;
+            }
 
             const expandIcon = isExpanded ? '&#9660;' : '&#9654;';
-            const rowBg = item.status === 'error' ? 'background:rgba(220,53,69,0.06);' : '';
+            const rowBg = item.status === 'error' ? 'background:rgba(220,53,69,0.06);' : (item.status === 'cancelled' ? 'background:rgba(230,126,34,0.06);' : '');
 
             let expandedContent = '';
             if (isExpanded) {
@@ -880,7 +896,7 @@ const CaricamentoRemi = {
                 }
                 expandedContent = `
                     <tr class="dash-expanded-row" style="${rowBg}">
-                        <td colspan="7" style="padding:12px 20px;border-top:none;">
+                        <td colspan="8" style="padding:12px 20px;border-top:none;">
                             <div style="margin-bottom:6px;font-size:0.85rem;color:var(--text-muted);">Codici REMI:</div>
                             <div style="display:flex;flex-wrap:wrap;">${remiList}</div>
                             ${errorSection}
@@ -897,7 +913,7 @@ const CaricamentoRemi = {
                     <td>${remiCount}</td>
                     <td>${statusBadge}</td>
                     <td>${sentAt}</td>
-                    <td style="text-align:right;">${resendBtn}</td>
+                    <td style="text-align:right;">${actionBtns}</td>
                 </tr>
                 ${expandedContent}`;
         }).join('');
@@ -947,6 +963,16 @@ const CaricamentoRemi = {
                 if (item) this.resendPractices(item);
             });
         });
+
+        document.querySelectorAll('.btn-status-change').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(btn.dataset.idx);
+                const newStatus = btn.dataset.newStatus;
+                const item = this.dashboardItems[idx];
+                if (item) this.changeStatus(item, newStatus);
+            });
+        });
     },
 
     async resendPractices(item) {
@@ -973,6 +999,41 @@ const CaricamentoRemi = {
                     }
                     const result = await res.json();
                     showToast(`${result.updated} pratiche reimpostate per il reinvio`, 'success');
+                    this.loadDashboardData();
+                } catch (err) {
+                    showToast(err.message, 'error');
+                }
+            }},
+        ]);
+    },
+
+    async changeStatus(item, newStatus) {
+        const statusLabels = { pending: 'In attesa', cancelled: 'Annullata', sent: 'Inviata' };
+        const targetLabel = statusLabels[newStatus] || newStatus;
+
+        const body = `
+            <p style="line-height:1.5;">
+                Cambiare lo stato di <strong>${item.remi_codes.length} pratiche</strong> di
+                <strong>${App.escapeHtml(item.company_name)}</strong> a
+                <strong>${targetLabel}</strong>?
+            </p>`;
+
+        showModal('Conferma cambio stato', body, [
+            { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+            { label: 'Conferma', class: 'btn-primary', onClick: async () => {
+                closeModal();
+                try {
+                    const res = await Auth.apiRequest('/api/caricamento-remi/history/change-status', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ practice_ids: item.practice_ids, new_status: newStatus }),
+                    });
+                    if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.detail || 'Errore cambio stato');
+                    }
+                    const result = await res.json();
+                    showToast(`${result.updated} pratiche aggiornate a "${targetLabel}"`, 'success');
                     this.loadDashboardData();
                 } catch (err) {
                     showToast(err.message, 'error');
@@ -1037,6 +1098,8 @@ const CaricamentoRemi = {
                 return '<span class="badge" style="background:rgba(255,193,7,0.15);color:#d4a017;padding:4px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;">In attesa</span>';
             case 'sent':
                 return '<span class="badge badge-active" style="padding:4px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;">Inviata</span>';
+            case 'cancelled':
+                return '<span class="badge" style="background:rgba(230,126,34,0.15);color:#e67e22;padding:4px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;">Annullata</span>';
             case 'error':
                 return '<span class="badge" style="background:rgba(220,53,69,0.15);color:#dc3545;padding:4px 10px;border-radius:12px;font-size:0.8rem;font-weight:600;">Errore</span>';
             default:
