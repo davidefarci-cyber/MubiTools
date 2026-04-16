@@ -13,6 +13,9 @@ from app.auth.dependencies import get_current_user
 from app.database import get_db
 from app.models import DlRegistry, RemiPractice, User, log_audit
 from app.modules.caricamento_remi.schemas import (
+    DlRegistryBulkResponse,
+    DlRegistryBulkResultRow,
+    DlRegistryBulkRow,
     DlRegistryCreate,
     DlRegistryOut,
     DlRegistryUpdate,
@@ -240,6 +243,113 @@ def reactivate_registry(
 
     logger.info("DL riattivato: id=%d da %s", dl.id, current_user.username)
     return dl
+
+
+@router.post("/registry/bulk", response_model=DlRegistryBulkResponse)
+def bulk_create_registry(
+    rows: list[DlRegistryBulkRow],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> DlRegistryBulkResponse:
+    """Caricamento massivo distributori locali da incolla Excel."""
+    _require_module(current_user)
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="Nessuna riga da elaborare")
+
+    created = 0
+    skipped = 0
+    errors: list[DlRegistryBulkResultRow] = []
+
+    # Pre-carica tutte le P.IVA esistenti per controllo duplicati
+    existing_vats: set[str] = {
+        r[0] for r in db.query(DlRegistry.vat_number).all()
+    }
+    # Tiene traccia delle P.IVA elaborate in questo batch
+    batch_vats: set[str] = set()
+
+    for row in rows:
+        company = row.company_name.strip()
+        vat = row.vat_number.strip()
+        pec = row.pec_address.strip()
+
+        # Validazione campi obbligatori
+        if not company:
+            errors.append(DlRegistryBulkResultRow(
+                company_name=company, vat_number=vat, pec_address=pec,
+                valid=False, error="Ragione sociale mancante",
+            ))
+            skipped += 1
+            continue
+
+        # Validazione P.IVA
+        if not validate_partita_iva(vat):
+            errors.append(DlRegistryBulkResultRow(
+                company_name=company, vat_number=vat, pec_address=pec,
+                valid=False, error="P.IVA non valida (deve essere 11 cifre con checksum corretto)",
+            ))
+            skipped += 1
+            continue
+
+        # Validazione PEC
+        if not _EMAIL_RE.match(pec):
+            errors.append(DlRegistryBulkResultRow(
+                company_name=company, vat_number=vat, pec_address=pec,
+                valid=False, error="Formato PEC non valido",
+            ))
+            skipped += 1
+            continue
+
+        # Duplicato nel batch corrente
+        if vat in batch_vats:
+            errors.append(DlRegistryBulkResultRow(
+                company_name=company, vat_number=vat, pec_address=pec,
+                valid=False, error="P.IVA duplicata nel file",
+            ))
+            skipped += 1
+            continue
+
+        # Duplicato in anagrafica
+        if vat in existing_vats:
+            errors.append(DlRegistryBulkResultRow(
+                company_name=company, vat_number=vat, pec_address=pec,
+                valid=False, error="P.IVA già presente in anagrafica",
+            ))
+            skipped += 1
+            continue
+
+        # Crea il distributore
+        dl = DlRegistry(
+            company_name=company,
+            vat_number=vat,
+            pec_address=pec,
+            is_active=True,
+        )
+        db.add(dl)
+        batch_vats.add(vat)
+        existing_vats.add(vat)
+        created += 1
+
+    db.commit()
+
+    log_audit(
+        db,
+        "dl_registry_bulk_created",
+        user_id=current_user.id,
+        detail={
+            "created": created,
+            "skipped": skipped,
+            "errors_count": len(errors),
+        },
+    )
+
+    logger.info(
+        "Caricamento massivo DL: creati=%d, saltati=%d — utente %s",
+        created,
+        skipped,
+        current_user.username,
+    )
+    return DlRegistryBulkResponse(created=created, skipped=skipped, errors=errors)
 
 
 # --- Caricamento pratiche REMI ---

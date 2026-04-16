@@ -315,6 +315,7 @@ const CaricamentoRemi = {
                     <span>Anagrafica Distributori Locali</span>
                     <div style="display:flex;gap:12px;align-items:center;">
                         <input type="text" id="remi-search" placeholder="Cerca per ragione sociale, P.IVA o PEC..." style="width:300px;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.9rem;">
+                        <button class="btn btn-sm" id="btn-bulk-dl" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);cursor:pointer;">Caricamento Massivo</button>
                         <button class="btn btn-primary btn-sm" id="btn-new-dl">+ Nuovo Distributore</button>
                     </div>
                 </div>
@@ -325,6 +326,7 @@ const CaricamentoRemi = {
         `;
 
         document.getElementById('btn-new-dl').addEventListener('click', () => this.showCreateModal());
+        document.getElementById('btn-bulk-dl').addEventListener('click', () => this.showBulkUpload());
         document.getElementById('remi-search').addEventListener('input', (e) => {
             this.searchTerm = e.target.value.trim().toLowerCase();
             this.renderRegistryTable();
@@ -660,6 +662,256 @@ const CaricamentoRemi = {
                 showToast(err.message, 'error');
             }
         }
+    },
+
+    // --- Caricamento Massivo Distributori ---
+
+    showBulkUpload() {
+        const content = document.getElementById('remi-tab-content');
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+                    <span>Caricamento Massivo Distributori</span>
+                    <button class="btn btn-sm btn-cancel" id="btn-bulk-back">Torna all'Anagrafica</button>
+                </div>
+                <div class="form-group">
+                    <label>Incolla qui i dati da Excel (tre colonne: RAGIONE SOCIALE, P.IVA, INDIRIZZO PEC)</label>
+                    <textarea id="bulk-dl-paste-area" rows="14" style="width:100%;padding:12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-family:monospace;font-size:0.9rem;resize:vertical;" placeholder="Distribuzione Gas S.r.l.&#9;01234567890&#9;info@pec-gas.it&#10;Energia Locale S.p.A.&#9;09876543210&#9;pec@energialocale.it"></textarea>
+                    <p style="color:var(--text-muted);font-size:0.8rem;margin-top:4px;">Una riga per distributore — separatore: tab (copia da Excel). La prima riga viene ignorata se contiene le intestazioni.</p>
+                </div>
+                <div style="margin-top:16px;">
+                    <button class="btn btn-primary" id="btn-bulk-parse">Verifica Dati</button>
+                </div>
+            </div>`;
+
+        document.getElementById('btn-bulk-back').addEventListener('click', () => this.renderAnagrafica(content));
+        document.getElementById('btn-bulk-parse').addEventListener('click', () => this.parseBulkData());
+    },
+
+    parseBulkExcelPaste(text) {
+        const rows = [];
+        const lines = text.split('\n');
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            // Separatore: tab (da Excel)
+            const cols = trimmed.split('\t');
+            if (cols.length < 3) continue;
+            const companyName = cols[0].trim();
+            const vatNumber = cols[1].trim();
+            const pecAddress = cols[2].trim();
+            // Ignora riga di intestazione
+            if (companyName.toUpperCase() === 'RAGIONE SOCIALE' || vatNumber.toUpperCase() === 'P. IVA' || vatNumber.toUpperCase() === 'P.IVA') continue;
+            if (companyName || vatNumber || pecAddress) {
+                rows.push({ company_name: companyName, vat_number: vatNumber, pec_address: pecAddress });
+            }
+        }
+        return rows;
+    },
+
+    parseBulkData() {
+        const text = document.getElementById('bulk-dl-paste-area').value;
+        const parsed = this.parseBulkExcelPaste(text);
+
+        if (!parsed.length) {
+            showToast('Nessuna riga valida trovata. Verificare il formato (3 colonne separate da tab)', 'error');
+            return;
+        }
+
+        // Validazione client-side con anteprima
+        const preview = [];
+        const seenVats = new Set();
+        for (const row of parsed) {
+            let valid = true;
+            let error = null;
+
+            if (!row.company_name) {
+                valid = false;
+                error = 'Ragione sociale mancante';
+            } else if (!this.validateVatNumber(row.vat_number)) {
+                valid = false;
+                error = 'P.IVA non valida';
+            } else if (!this.validateEmail(row.pec_address)) {
+                valid = false;
+                error = 'Formato PEC non valido';
+            } else if (seenVats.has(row.vat_number)) {
+                valid = false;
+                error = 'P.IVA duplicata nel file';
+            } else {
+                // Controlla duplicati contro l'anagrafica già caricata
+                const existingDl = this.registry.find(dl => dl.vat_number === row.vat_number);
+                if (existingDl) {
+                    valid = false;
+                    error = 'P.IVA già presente in anagrafica';
+                }
+            }
+
+            if (valid) seenVats.add(row.vat_number);
+
+            preview.push({ ...row, valid, error });
+        }
+
+        this.renderBulkPreview(preview);
+    },
+
+    renderBulkPreview(preview) {
+        const content = document.getElementById('remi-tab-content');
+        const validCount = preview.filter(r => r.valid).length;
+        const invalidCount = preview.filter(r => !r.valid).length;
+
+        let warningBanner = '';
+        if (invalidCount > 0) {
+            warningBanner = `
+                <div style="background:rgba(255,193,7,0.15);border:1px solid rgba(255,193,7,0.4);border-radius:8px;padding:12px 16px;margin-bottom:16px;color:var(--text-primary);font-size:0.9rem;">
+                    Le righe evidenziate in rosso non verranno caricate. Verificare i dati prima di procedere.
+                </div>`;
+        }
+
+        const rows = preview.map(r => {
+            const rowBg = r.valid ? '' : 'background:rgba(220,53,69,0.08);';
+            const badge = r.valid
+                ? '<span class="badge badge-active">Valido</span>'
+                : `<span class="badge badge-disabled" style="background:rgba(220,53,69,0.15);color:#dc3545;">${App.escapeHtml(r.error)}</span>`;
+
+            return `
+                <tr style="${rowBg}">
+                    <td>${App.escapeHtml(r.company_name || '—')}</td>
+                    <td style="font-family:monospace;">${App.escapeHtml(r.vat_number || '—')}</td>
+                    <td>${App.escapeHtml(r.pec_address || '—')}</td>
+                    <td>${badge}</td>
+                </tr>`;
+        }).join('');
+
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+                    <span>Anteprima Caricamento Massivo</span>
+                    <span style="font-size:0.85rem;font-weight:normal;color:var(--text-muted);">${preview.length} righe totali</span>
+                </div>
+                <div style="margin-bottom:16px;font-size:0.9rem;">
+                    <span style="color:var(--accent-green);font-weight:600;">${validCount} valide</span>,
+                    <span style="color:${invalidCount ? '#dc3545' : 'var(--text-muted)'};font-weight:600;">${invalidCount} con errori</span>
+                </div>
+                ${warningBanner}
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Ragione Sociale</th>
+                                <th>P.IVA</th>
+                                <th>PEC</th>
+                                <th>Stato</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+                <div style="display:flex;gap:12px;margin-top:20px;">
+                    <button class="btn btn-primary" id="btn-bulk-confirm" ${validCount === 0 ? 'disabled' : ''}>Conferma Inserimento (${validCount})</button>
+                    <button class="btn btn-cancel" id="btn-bulk-reset">Modifica Dati</button>
+                </div>
+            </div>`;
+
+        this._bulkPreviewData = preview;
+
+        document.getElementById('btn-bulk-confirm').addEventListener('click', () => this.submitBulkUpload());
+        document.getElementById('btn-bulk-reset').addEventListener('click', () => this.showBulkUpload());
+    },
+
+    async submitBulkUpload() {
+        const validRows = this._bulkPreviewData.filter(r => r.valid).map(r => ({
+            company_name: r.company_name,
+            vat_number: r.vat_number,
+            pec_address: r.pec_address,
+        }));
+
+        if (!validRows.length) {
+            showToast('Nessuna riga valida da caricare', 'error');
+            return;
+        }
+
+        const confirmBtn = document.getElementById('btn-bulk-confirm');
+        if (confirmBtn) {
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Inserimento in corso...';
+        }
+
+        try {
+            const res = await Auth.apiRequest('/api/caricamento-remi/registry/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(validRows),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore durante il caricamento massivo');
+            }
+            const result = await res.json();
+
+            let msg = `Caricamento completato: ${result.created} distributori creati`;
+            if (result.skipped > 0) {
+                msg += `, ${result.skipped} saltati`;
+            }
+            showToast(msg, 'success');
+
+            // Se ci sono errori dal server, mostra i dettagli
+            if (result.errors && result.errors.length > 0) {
+                this.renderBulkResults(result);
+            } else {
+                setTimeout(() => {
+                    this.renderAnagrafica(document.getElementById('remi-tab-content'));
+                }, 1500);
+            }
+        } catch (err) {
+            showToast(err.message, 'error');
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = `Conferma Inserimento`;
+            }
+        }
+    },
+
+    renderBulkResults(result) {
+        const content = document.getElementById('remi-tab-content');
+
+        const errorRows = result.errors.map(r => `
+            <tr style="background:rgba(220,53,69,0.08);">
+                <td>${App.escapeHtml(r.company_name || '—')}</td>
+                <td style="font-family:monospace;">${App.escapeHtml(r.vat_number || '—')}</td>
+                <td>${App.escapeHtml(r.pec_address || '—')}</td>
+                <td><span class="badge badge-disabled" style="background:rgba(220,53,69,0.15);color:#dc3545;">${App.escapeHtml(r.error || 'Errore')}</span></td>
+            </tr>`).join('');
+
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-title">Risultato Caricamento Massivo</div>
+                <div style="margin-bottom:16px;font-size:0.9rem;">
+                    <span style="color:var(--accent-green);font-weight:600;">${result.created} creati</span>,
+                    <span style="color:#dc3545;font-weight:600;">${result.skipped} scartati</span>
+                </div>
+                ${result.errors.length > 0 ? `
+                <div style="margin-bottom:12px;font-size:0.9rem;color:var(--text-muted);">Righe scartate dal server:</div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Ragione Sociale</th>
+                                <th>P.IVA</th>
+                                <th>PEC</th>
+                                <th>Motivo</th>
+                            </tr>
+                        </thead>
+                        <tbody>${errorRows}</tbody>
+                    </table>
+                </div>` : ''}
+                <div style="margin-top:20px;">
+                    <button class="btn btn-primary" id="btn-bulk-back-to-registry">Torna all'Anagrafica</button>
+                </div>
+            </div>`;
+
+        document.getElementById('btn-bulk-back-to-registry').addEventListener('click', () => {
+            this.renderAnagrafica(document.getElementById('remi-tab-content'));
+        });
     },
 
     // --- Dashboard ---
