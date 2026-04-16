@@ -269,34 +269,28 @@ const InvioRemi = {
                                     <tr style="border-bottom:1px solid var(--border);">
                                         <th style="text-align:left;padding:6px 8px;color:var(--text-muted);">Tag</th>
                                         <th style="text-align:left;padding:6px 8px;color:var(--text-muted);">Descrizione</th>
-                                        <th style="text-align:center;padding:6px 8px;color:var(--text-muted);">Testo PEC</th>
-                                        <th style="text-align:center;padding:6px 8px;color:var(--text-muted);">Template DOCX</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <tr style="border-bottom:1px solid var(--border);">
                                         <td style="padding:6px 8px;"><code>&lt;REMI&gt;</code></td>
                                         <td style="padding:6px 8px;color:var(--text-primary);">Codici REMI (PEC: virgola; DOCX: tabella)</td>
-                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
-                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
                                     </tr>
                                     <tr style="border-bottom:1px solid var(--border);">
                                         <td style="padding:6px 8px;"><code>&lt;NOME_DL&gt;</code></td>
                                         <td style="padding:6px 8px;color:var(--text-primary);">Ragione sociale del distributore</td>
-                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
-                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
                                     </tr>
                                     <tr style="border-bottom:1px solid var(--border);">
                                         <td style="padding:6px 8px;"><code>&lt;PEC_DL&gt;</code></td>
                                         <td style="padding:6px 8px;color:var(--text-primary);">Indirizzo PEC del distributore</td>
-                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
-                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
                                     </tr>
-                                    <tr>
+                                    <tr style="border-bottom:1px solid var(--border);">
                                         <td style="padding:6px 8px;"><code>&lt;DATA_DECORRENZA&gt;</code></td>
                                         <td style="padding:6px 8px;color:var(--text-primary);">Data decorrenza (DD/MM/YYYY)</td>
-                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
-                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding:6px 8px;"><code>&lt;DATA&gt;</code></td>
+                                        <td style="padding:6px 8px;color:var(--text-primary);">Data di oggi (DD/MM/YYYY)</td>
                                     </tr>
                                 </tbody>
                             </table>

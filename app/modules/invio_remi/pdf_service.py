@@ -239,6 +239,7 @@ async def generate_pdf(
             "<NOME_DL>": company_name,
             "<PEC_DL>": pec_address,
             "<DATA_DECORRENZA>": format_date_for_display(effective_date),
+            "<DATA>": datetime.now().strftime("%d/%m/%Y"),
         }
 
         _replace_tags_in_document(doc, replacements, remi_codes)
