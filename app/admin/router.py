@@ -518,6 +518,36 @@ async def restore_database(
     }
 
 
+@router.post("/db/reinit")
+def reinit_database(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Elimina e ricrea tutte le tabelle del database (reset completo).
+
+    Esegue un backup automatico prima di procedere.
+    """
+    _BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    auto_backup_name = f"mubi_pre_reinit_{ts}.db"
+    auto_backup_path = _BACKUPS_DIR / auto_backup_name
+    if _DB_PATH.exists():
+        shutil.copy2(str(_DB_PATH), str(auto_backup_path))
+
+    log_audit(db, "db_reinit", user_id=admin.id, detail={"auto_backup": auto_backup_name})
+
+    db.close()
+    engine.dispose()
+
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    return {
+        "message": "Database reinizializzato con successo",
+        "auto_backup": auto_backup_name,
+    }
+
+
 @router.get("/db/has-backups")
 def has_backups(admin: User = Depends(require_admin)) -> dict:
     """Controlla se esistono backup precedenti nella cartella data/backups/."""

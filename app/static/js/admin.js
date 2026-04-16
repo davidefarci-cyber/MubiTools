@@ -34,6 +34,7 @@ const Admin = {
                     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
                         <button class="btn btn-primary btn-sm" id="btn-db-backup">Scarica Backup</button>
                         <button class="btn btn-sm btn-warn" id="btn-db-restore">Ripristina Backup</button>
+                        <button class="btn btn-sm btn-danger" id="btn-db-reinit">Reinizializza DB</button>
                     </div>
                 </div>
             </div>
@@ -60,6 +61,7 @@ const Admin = {
         document.getElementById('btn-add-pec').addEventListener('click', () => this.showCreatePecModal());
         document.getElementById('btn-db-backup').addEventListener('click', () => this.downloadBackup());
         document.getElementById('btn-db-restore').addEventListener('click', () => this.showRestoreModal());
+        document.getElementById('btn-db-reinit').addEventListener('click', () => this.confirmReinitDb());
         this.loadUsers();
         this.loadPecAccounts();
         this.loadSystemInfo();
@@ -959,5 +961,40 @@ const Admin = {
             if (progress) progress.style.display = 'none';
             showToast(err.message, 'error');
         }
-    }
+    },
+
+    confirmReinitDb() {
+        showModal(
+            'Reinizializza Database',
+            `<p style="color:var(--accent-red);font-weight:600;margin-bottom:12px;">
+                Attenzione: questa operazione elimina tutti i dati presenti nel database.
+             </p>
+             <p style="color:var(--text-muted);font-size:0.9rem;">
+                Verrà eseguito un backup automatico prima di procedere.<br>
+                Utenti, PEC, pratiche e tutti i record verranno cancellati definitivamente.
+             </p>`,
+            [
+                { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+                {
+                    label: 'Reinizializza',
+                    class: 'btn-danger',
+                    onClick: async () => {
+                        closeModal();
+                        try {
+                            const res = await Auth.apiRequest('/admin/db/reinit', { method: 'POST' });
+                            if (!res.ok) {
+                                const err = await res.json();
+                                throw new Error(err.detail || 'Errore durante la reinizializzazione');
+                            }
+                            const data = await res.json();
+                            showToast(`Database reinizializzato. Backup: ${data.auto_backup}`, 'success');
+                            setTimeout(() => window.location.reload(), 1500);
+                        } catch (err) {
+                            showToast(err.message, 'error');
+                        }
+                    },
+                },
+            ]
+        );
+    },
 };
