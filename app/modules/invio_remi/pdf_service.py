@@ -200,8 +200,8 @@ async def generate_pdf(
     pec_address: str,
     effective_date: str,
     remi_codes: list[str],
-) -> tuple[bytes, str]:
-    """Genera un PDF (o DOCX se LibreOffice non disponibile) dal template DOCX.
+) -> bytes:
+    """Genera un PDF dal template DOCX tramite conversione con soffice.
 
     Args:
         company_name: Ragione sociale del distributore.
@@ -210,15 +210,24 @@ async def generate_pdf(
         remi_codes: Lista di codici REMI da inserire.
 
     Returns:
-        Tupla (contenuto_file, formato) dove formato è "pdf" o "docx".
+        Contenuto binario del PDF generato.
 
     Raises:
-        RuntimeError: Se la conversione PDF fallisce.
+        RuntimeError: Se soffice non è disponibile o la conversione fallisce.
         FileNotFoundError: Se il template DOCX non esiste.
     """
     template_path = settings_service.get_template_path()
     if not template_path.exists():
         raise FileNotFoundError("Template DOCX non trovato")
+
+    # Verifica disponibilità soffice
+    soffice_path = shutil.which("soffice")
+    if not soffice_path:
+        raise RuntimeError(
+            "soffice non trovato nel PATH di sistema. "
+            "Installare OpenOffice/LibreOffice con il pacchetto writer "
+            "(es. apt install libreoffice-writer)"
+        )
 
     # Crea directory temporanea per il lavoro
     tmp_dir = tempfile.mkdtemp(prefix="remi_pdf_")
@@ -238,17 +247,8 @@ async def generate_pdf(
         tmp_docx = os.path.join(tmp_dir, "document.docx")
         doc.save(tmp_docx)
 
-        # Verifica disponibilità LibreOffice (prova entrambi i nomi binario)
-        soffice_path = shutil.which("soffice") or shutil.which("libreoffice")
-        if not soffice_path:
-            logger.warning(
-                "LibreOffice non trovato: il documento verrà allegato come DOCX"
-            )
-            with open(tmp_docx, "rb") as f:
-                docx_bytes = f.read()
-            return (docx_bytes, "docx")
-
-        # Converti in PDF con LibreOffice headless
+        # Converti in PDF con soffice headless
+        logger.info("Avvio conversione PDF: %s -> %s", tmp_docx, tmp_dir)
         process = await asyncio.create_subprocess_exec(
             soffice_path,
             "--headless",
@@ -260,24 +260,41 @@ async def generate_pdf(
         )
         stdout, stderr = await process.communicate()
 
+        stdout_txt = stdout.decode("utf-8", errors="replace").strip()
+        stderr_txt = stderr.decode("utf-8", errors="replace").strip()
+
+        if stdout_txt:
+            logger.info("soffice stdout: %s", stdout_txt)
+        if stderr_txt:
+            logger.warning("soffice stderr: %s", stderr_txt)
+
         if process.returncode != 0:
-            error_msg = stderr.decode("utf-8", errors="replace").strip()
-            logger.error("LibreOffice conversion failed: %s", error_msg)
+            logger.error(
+                "soffice conversione fallita (exit code %d): stdout=%s stderr=%s",
+                process.returncode, stdout_txt, stderr_txt,
+            )
             raise RuntimeError(
-                f"Impossibile generare il PDF: errore conversione LibreOffice ({error_msg})"
+                f"Conversione PDF fallita (exit code {process.returncode}): {stderr_txt or stdout_txt}"
             )
 
         # Leggi il PDF generato
         tmp_pdf = os.path.join(tmp_dir, "document.pdf")
         if not os.path.exists(tmp_pdf):
+            logger.error(
+                "PDF non generato nonostante exit code 0. stdout=%s stderr=%s",
+                stdout_txt, stderr_txt,
+            )
             raise RuntimeError(
-                "Impossibile generare il PDF: file PDF non trovato dopo conversione"
+                f"PDF non generato da soffice. "
+                f"Verificare che il pacchetto writer sia installato. "
+                f"Output soffice: {stdout_txt or stderr_txt}"
             )
 
         with open(tmp_pdf, "rb") as f:
             pdf_bytes = f.read()
 
-        return (pdf_bytes, "pdf")
+        logger.info("PDF generato con successo (%d bytes)", len(pdf_bytes))
+        return pdf_bytes
 
     finally:
         # Pulizia file temporanei
