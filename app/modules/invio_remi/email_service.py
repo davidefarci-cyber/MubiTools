@@ -15,7 +15,7 @@ from app.utils.encryption import decrypt_password
 logger = logging.getLogger(__name__)
 
 # Parametri SMTP Aruba fissi
-SMTP_HOST = "smtps.aruba.it"
+SMTP_HOST = "smtps.pec.aruba.it"
 SMTP_PORT = 465
 SMTP_TIMEOUT = 30
 

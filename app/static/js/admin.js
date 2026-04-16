@@ -141,13 +141,15 @@ const Admin = {
     },
 
     bindUserActions() {
-        document.querySelectorAll('.btn-edit').forEach(btn => {
+        const usersContainer = document.getElementById('admin-users-list');
+        if (!usersContainer) return;
+        usersContainer.querySelectorAll('.btn-edit').forEach(btn => {
             btn.addEventListener('click', () => {
                 const user = this.users.find(u => u.id === parseInt(btn.dataset.id));
                 if (user) this.showEditUserModal(user);
             });
         });
-        document.querySelectorAll('.btn-toggle').forEach(btn => {
+        usersContainer.querySelectorAll('.btn-toggle').forEach(btn => {
             btn.addEventListener('click', () => {
                 const user = this.users.find(u => u.id === parseInt(btn.dataset.id));
                 if (user) this.confirmToggleUser(user);
@@ -385,8 +387,8 @@ const Admin = {
                     </td>
                     <td>
                         <div style="display:flex;gap:6px;">
-                            <button class="btn btn-sm btn-edit btn-pec-test" data-id="${p.id}" title="Testa Connessione">Testa</button>
-                            <button class="btn btn-sm btn-edit btn-pec-edit" data-id="${p.id}" title="Modifica">Modifica</button>
+                            <button class="btn btn-sm btn-pec-test" data-id="${p.id}" title="Testa Connessione">Testa</button>
+                            <button class="btn btn-sm btn-pec-edit" data-id="${p.id}" title="Modifica">Modifica</button>
                             <button class="btn btn-sm btn-warn btn-pec-delete" data-id="${p.id}" title="Elimina">Elimina</button>
                         </div>
                     </td>
@@ -449,7 +451,7 @@ const Admin = {
                 </div>
                 <div style="background:var(--bg-tertiary);border-radius:var(--radius);padding:12px;margin-top:12px;">
                     <p style="color:var(--text-muted);font-size:0.85rem;margin:0;">
-                        <strong>Parametri SMTP (fissi):</strong> smtps.aruba.it : 465 (SSL)
+                        <strong>Parametri SMTP (fissi):</strong> smtps.pec.aruba.it : 465 (SSL)
                     </p>
                 </div>
             </form>`;
@@ -516,7 +518,7 @@ const Admin = {
                 </div>
                 <div style="background:var(--bg-tertiary);border-radius:var(--radius);padding:12px;margin-top:12px;">
                     <p style="color:var(--text-muted);font-size:0.85rem;margin:0;">
-                        <strong>Parametri SMTP (fissi):</strong> smtps.aruba.it : 465 (SSL)
+                        <strong>Parametri SMTP (fissi):</strong> smtps.pec.aruba.it : 465 (SSL)
                     </p>
                 </div>
             </form>`;
