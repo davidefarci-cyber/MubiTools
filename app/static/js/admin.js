@@ -387,8 +387,8 @@ const Admin = {
                     </td>
                     <td>
                         <div style="display:flex;gap:6px;">
-                            <button class="btn btn-sm btn-edit btn-pec-test" data-id="${p.id}" title="Testa Connessione">Testa</button>
-                            <button class="btn btn-sm btn-edit btn-pec-edit" data-id="${p.id}" title="Modifica">Modifica</button>
+                            <button class="btn btn-sm btn-pec-test" data-id="${p.id}" title="Testa Connessione">Testa</button>
+                            <button class="btn btn-sm btn-pec-edit" data-id="${p.id}" title="Modifica">Modifica</button>
                             <button class="btn btn-sm btn-warn btn-pec-delete" data-id="${p.id}" title="Elimina">Elimina</button>
                         </div>
                     </td>
