@@ -248,7 +248,7 @@ const InvioRemi = {
             ? `<div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg-tertiary);border-radius:6px;">
                     <span style="color:var(--accent-green);font-weight:600;">&#10003;</span>
                     <span style="color:var(--text-primary);flex:1;">${App.escapeHtml(s.docx_template_filename || 'remi_template.docx')}</span>
-                    <button class="btn btn-sm" id="btn-download-template" style="background:var(--bg-secondary);">Scarica per verifica</button>
+                    <button class="btn btn-sm" id="btn-download-template" style="background:var(--bg-secondary);color:var(--text-primary);">Scarica per verifica</button>
                     <button class="btn btn-sm" id="btn-replace-template" style="background:var(--bg-secondary);color:var(--accent-amber);">Sostituisci</button>
                </div>
                <div id="template-upload-zone" style="display:none;margin-top:12px;"></div>`
