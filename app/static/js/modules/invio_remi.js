@@ -307,6 +307,18 @@ const InvioRemi = {
                     <label>Template DOCX</label>
                     ${templateSection}
                 </div>
+                <hr style="border:none;border-top:1px solid var(--border);margin:20px 0 16px;">
+                <div class="form-group">
+                    <label>Aggiorna indirizzi PEC</label>
+                    <p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:8px;">Se hai corretto un indirizzo PEC in anagrafica, usa questo tasto per aggiornare tutte le pratiche in attesa di invio con i dati aggiornati.</p>
+                    <button class="btn btn-sm" id="btn-sync-registry" style="background:var(--bg-tertiary);color:var(--text-primary);">
+                        <span style="display:flex;align-items:center;gap:6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                            Sincronizza da Anagrafica
+                        </span>
+                    </button>
+                    <div id="sync-registry-result" style="margin-top:8px;min-height:18px;"></div>
+                </div>
             </form>`;
 
         showModal('Impostazioni Invio REMI', body, [
@@ -350,6 +362,36 @@ const InvioRemi = {
                 const zone = document.getElementById('template-upload-zone');
                 zone.style.display = 'block';
                 this._renderUploadZone('template-upload-zone');
+            });
+        }
+
+        // Sincronizza PEC da anagrafica
+        const syncBtn = document.getElementById('btn-sync-registry');
+        if (syncBtn) {
+            syncBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const resultDiv = document.getElementById('sync-registry-result');
+                syncBtn.disabled = true;
+                syncBtn.style.opacity = '0.6';
+                resultDiv.innerHTML = '<span style="color:var(--text-muted);font-size:0.85rem;">Sincronizzazione in corso...</span>';
+                try {
+                    const res = await Auth.apiRequest('/api/invio-remi/sync-registry', { method: 'POST' });
+                    if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.detail || 'Errore sincronizzazione');
+                    }
+                    const data = await res.json();
+                    if (data.updated > 0) {
+                        resultDiv.innerHTML = `<span style="color:var(--accent-green);font-size:0.85rem;font-weight:600;">${data.updated} pratiche aggiornate su ${data.total_pending} in attesa</span>`;
+                    } else {
+                        resultDiv.innerHTML = `<span style="color:var(--text-muted);font-size:0.85rem;">Nessun aggiornamento necessario (${data.total_pending} pratiche in attesa gi\u00E0 allineate)</span>`;
+                    }
+                } catch (err) {
+                    resultDiv.innerHTML = `<span style="color:var(--accent-red);font-size:0.85rem;">${App.escapeHtml(err.message)}</span>`;
+                } finally {
+                    syncBtn.disabled = false;
+                    syncBtn.style.opacity = '1';
+                }
             });
         }
     },
