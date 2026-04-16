@@ -17,7 +17,7 @@ from app.admin import update_service
 from app.auth.dependencies import require_admin
 from app.config import BASE_DIR
 from app.database import Base, SessionLocal, engine, get_db
-from app.models import PecAccount, User, log_audit
+from app.models import AuditLog, PecAccount, User, log_audit
 from app.utils.encryption import decrypt_password, encrypt_password
 
 logger = logging.getLogger(__name__)
@@ -222,6 +222,22 @@ def get_audit_log(
             for log in logs
         ],
     }
+
+
+@router.delete("/audit-log")
+def clear_audit_log(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Cancella tutte le voci dell'audit log e registra l'operazione."""
+    deleted = db.query(AuditLog).delete()
+    db.commit()
+    log_audit(
+        db, "audit_log_cleared",
+        user_id=admin.id,
+        detail={"deleted_entries": deleted},
+    )
+    return {"deleted": deleted}
 
 
 # --- PEC Accounts ---

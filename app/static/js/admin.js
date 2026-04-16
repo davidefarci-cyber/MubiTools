@@ -51,7 +51,10 @@ const Admin = {
                 </div>
             </div>
             <div class="card">
-                <div class="card-title">Audit Log</div>
+                <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    <span>Audit Log</span>
+                    <button class="btn btn-sm btn-warn" id="btn-audit-clear">Pulisci log</button>
+                </div>
                 <div id="admin-audit-log">
                     <div class="spinner" style="margin:20px auto;"></div>
                 </div>
@@ -62,6 +65,7 @@ const Admin = {
         document.getElementById('btn-db-backup').addEventListener('click', () => this.downloadBackup());
         document.getElementById('btn-db-restore').addEventListener('click', () => this.showRestoreModal());
         document.getElementById('btn-db-reinit').addEventListener('click', () => this.confirmReinitDb());
+        document.getElementById('btn-audit-clear').addEventListener('click', () => this.confirmClearAuditLog());
         this.loadUsers();
         this.loadPecAccounts();
         this.loadSystemInfo();
@@ -844,6 +848,36 @@ const Admin = {
         } catch (err) {
             container.innerHTML = `<p style="color:var(--accent-red)">${App.escapeHtml(err.message)}</p>`;
         }
+    },
+
+    confirmClearAuditLog() {
+        showModal(
+            'Pulisci audit log',
+            `<p>Cancellare <strong>tutte</strong> le voci dell'audit log?</p>
+             <p style="color:var(--text-muted);font-size:0.85rem;">L'operazione è irreversibile. Verrà registrata una nuova voce 'audit_log_cleared' con l'utente che ha eseguito la pulizia.</p>`,
+            [
+                { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+                {
+                    label: 'Pulisci',
+                    class: 'btn-danger',
+                    onClick: async () => {
+                        closeModal();
+                        try {
+                            const res = await Auth.apiRequest('/admin/audit-log', { method: 'DELETE' });
+                            if (!res.ok) {
+                                const err = await res.json();
+                                throw new Error(err.detail || 'Errore durante la pulizia del log');
+                            }
+                            const data = await res.json();
+                            showToast(`${data.deleted} voci cancellate`, 'success');
+                            this.loadAuditLog(1);
+                        } catch (err) {
+                            showToast(err.message, 'error');
+                        }
+                    },
+                },
+            ]
+        );
     },
 
     // --- Database Backup / Restore ---
