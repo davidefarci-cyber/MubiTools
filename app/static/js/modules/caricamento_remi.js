@@ -4,7 +4,7 @@
  */
 
 const CaricamentoRemi = {
-    currentTab: 'anagrafica',
+    currentTab: 'caricamento',
     registry: [],
     searchTerm: '',
     matchResults: null,
@@ -25,8 +25,8 @@ const CaricamentoRemi = {
 
         container.innerHTML = `
             <div class="module-tabs" style="display:flex;gap:0;margin-bottom:24px;border-bottom:2px solid var(--border);">
-                <button class="module-tab" data-tab="caricamento" style="padding:12px 24px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.95rem;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;">Caricamento REMI</button>
-                <button class="module-tab active" data-tab="anagrafica" style="padding:12px 24px;background:none;border:none;color:var(--accent);cursor:pointer;font-size:0.95rem;font-weight:600;border-bottom:2px solid var(--accent);margin-bottom:-2px;transition:all 0.2s;">Anagrafica DL</button>
+                <button class="module-tab active" data-tab="caricamento" style="padding:12px 24px;background:none;border:none;color:var(--accent);cursor:pointer;font-size:0.95rem;font-weight:600;border-bottom:2px solid var(--accent);margin-bottom:-2px;transition:all 0.2s;">Caricamento REMI</button>
+                <button class="module-tab" data-tab="anagrafica" style="padding:12px 24px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.95rem;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;">Anagrafica DL</button>
                 <button class="module-tab" data-tab="dashboard" style="padding:12px 24px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.95rem;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s;">Dashboard</button>
             </div>
             <div id="remi-tab-content"></div>
@@ -82,8 +82,8 @@ const CaricamentoRemi = {
                 <div class="card-title">Caricamento Pratiche REMI</div>
                 <div class="form-group">
                     <label>Incolla qui i dati da Excel (due colonne: P.IVA e Codice REMI)</label>
-                    <textarea id="remi-paste-area" rows="12" style="width:100%;padding:12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-family:monospace;font-size:0.9rem;resize:vertical;" placeholder="01234567890&#9;IT001E00123456&#10;09876543210&#9;IT001E00654321"></textarea>
-                    <p style="color:var(--text-muted);font-size:0.8rem;margin-top:4px;">Copia direttamente da Excel — sono accettate colonne separate da tab</p>
+                    <textarea id="remi-paste-area" rows="12" style="width:100%;padding:12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-family:monospace;font-size:0.9rem;resize:vertical;" placeholder="01234567890, IT001E00123456&#10;09876543210, IT001E00654321"></textarea>
+                    <p style="color:var(--text-muted);font-size:0.8rem;margin-top:4px;">Una riga per coppia — separatori accettati: tab (da Excel), virgola o spazio</p>
                 </div>
                 <div class="form-group">
                     <label>Data decorrenza <span style="color:var(--accent-red)">*</span></label>
@@ -103,7 +103,8 @@ const CaricamentoRemi = {
         for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed) continue;
-            const cols = trimmed.split('\t');
+            // Accetta tab, virgola, punto e virgola o spazi come separatore
+            const cols = trimmed.split(/[\t,;]+|\s+/);
             if (cols.length < 2) continue;
             const vatNumber = cols[0].trim();
             const remiCode = cols[1].trim();
@@ -125,7 +126,7 @@ const CaricamentoRemi = {
 
         const parsed = this.parseExcelPaste(text);
         if (!parsed.length) {
-            showToast('Nessuna riga valida trovata. Verificare il formato (P.IVA + tab + Codice REMI)', 'error');
+            showToast('Nessuna riga valida trovata. Verificare il formato (P.IVA e Codice REMI separati da tab, virgola o spazio)', 'error');
             return;
         }
 
