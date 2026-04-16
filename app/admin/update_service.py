@@ -109,15 +109,42 @@ def _run_command(cmd: list[str], cwd: Path | None = None) -> tuple[int, str]:
 
 
 def _restart_service_async(delay: float = 4.0) -> None:
-    """Riavvia il servizio Windows/Linux in background dopo aver restituito la risposta HTTP."""
+    """Avvia il riavvio del servizio in background, indipendente dal processo corrente.
+
+    Su Windows: spawn di un processo cmd.exe **detached** e staccato dal job
+    object di NSSM. Necessario perché 'net stop mubi-tools' fa terminare
+    il processo Python corrente (incluso un eventuale thread) — solo un
+    processo davvero staccato può eseguire 'net start' a valle.
+    Su Linux: systemctl gestisce il restart via D-Bus, un thread basta.
+    """
+    if sys.platform == "win32":
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+        delay_s = max(1, int(delay))
+        # '&' (non '&&') => net start viene eseguito anche se net stop ritorna errore
+        # (es. servizio già fermo o timeout sul canale SCM).
+        cmd_line = (
+            f"timeout /t {delay_s} /nobreak >nul & "
+            f"net stop {SERVICE_NAME} & "
+            f"net start {SERVICE_NAME}"
+        )
+        subprocess.Popen(
+            ["cmd", "/c", cmd_line],
+            creationflags=(
+                DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+            ),
+            close_fds=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
+
     def _do_restart() -> None:
         import time
         time.sleep(delay)
-        if sys.platform == "win32":
-            _run_command(["net", "stop", SERVICE_NAME])
-            _run_command(["net", "start", SERVICE_NAME])
-        else:
-            _run_command(["systemctl", "restart", SERVICE_NAME])
+        _run_command(["systemctl", "restart", SERVICE_NAME])
 
     threading.Thread(target=_do_restart, daemon=True).start()
 
