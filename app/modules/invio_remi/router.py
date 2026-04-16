@@ -278,6 +278,7 @@ async def send_all(
                     body = body.replace("<NOME_DL>", company_name)
                     body = body.replace("<PEC_DL>", pec_address)
                     body = body.replace("<DATA_DECORRENZA>", formatted_date)
+                    body = body.replace("<DATA>", datetime.now().strftime("%d/%m/%Y"))
 
                     attachment_filename = f"REMI_{vat_number}.pdf"
 
