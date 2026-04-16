@@ -525,7 +525,9 @@ def reinit_database(
 ) -> dict:
     """Elimina e ricrea tutte le tabelle del database (reset completo).
 
-    Esegue un backup automatico prima di procedere.
+    Esegue un backup automatico prima di procedere e ricrea l'utente admin
+    di default (altrimenti il DB resterebbe senza utenti e nessuno potrebbe
+    più autenticarsi fino al prossimo restart del servizio).
     """
     _BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -534,13 +536,23 @@ def reinit_database(
     if _DB_PATH.exists():
         shutil.copy2(str(_DB_PATH), str(auto_backup_path))
 
-    log_audit(db, "db_reinit", user_id=admin.id, detail={"auto_backup": auto_backup_name})
-
     db.close()
     engine.dispose()
 
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+
+    # Ricrea l'utente admin di default e registra il reinit nel nuovo audit log
+    new_db = SessionLocal()
+    try:
+        admin_service.ensure_admin_exists(new_db)
+        log_audit(
+            new_db, "db_reinit",
+            user_id=None,
+            detail={"auto_backup": auto_backup_name, "triggered_by": admin.username},
+        )
+    finally:
+        new_db.close()
 
     return {
         "message": "Database reinizializzato con successo",
