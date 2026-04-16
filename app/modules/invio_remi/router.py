@@ -13,7 +13,7 @@ from starlette.responses import StreamingResponse
 
 from app.auth.dependencies import get_current_user
 from app.database import get_db
-from app.models import RemiPractice, User, log_audit
+from app.models import DlRegistry, RemiPractice, User, log_audit
 from app.modules.invio_remi import email_service, settings_service
 from app.modules.invio_remi.pdf_service import format_date_for_display, generate_pdf
 
@@ -78,6 +78,54 @@ def download_template(
         filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+
+# --- Sincronizzazione PEC da anagrafica ---
+
+
+@router.post("/sync-registry")
+def sync_pending_from_registry(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Aggiorna PEC e ragione sociale delle pratiche pending dall'anagrafica DL."""
+    pending = (
+        db.query(RemiPractice)
+        .filter(RemiPractice.status == "pending")
+        .all()
+    )
+
+    if not pending:
+        return {"updated": 0, "message": "Nessuna pratica in attesa"}
+
+    # Carica anagrafica corrente indicizzata per P.IVA
+    registry_entries = db.query(DlRegistry).filter(DlRegistry.is_active == True).all()
+    registry_map = {dl.vat_number: dl for dl in registry_entries}
+
+    updated_count = 0
+    for p in pending:
+        dl = registry_map.get(p.vat_number)
+        if not dl:
+            continue
+        changed = False
+        if p.pec_address != dl.pec_address:
+            p.pec_address = dl.pec_address
+            changed = True
+        if p.company_name != dl.company_name:
+            p.company_name = dl.company_name
+            changed = True
+        if changed:
+            updated_count += 1
+
+    if updated_count > 0:
+        db.commit()
+        log_audit(
+            db, "remi_sync_registry",
+            user_id=current_user.id,
+            detail={"updated": updated_count, "total_pending": len(pending)},
+        )
+
+    return {"updated": updated_count, "total_pending": len(pending)}
 
 
 # --- Pratiche pending aggregate per distributore ---
