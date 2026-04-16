@@ -261,7 +261,47 @@ const InvioRemi = {
                 <div class="form-group">
                     <label>Testo PEC</label>
                     <textarea id="setting-body-template" rows="6" style="width:100%;resize:vertical;" placeholder="Corpo della PEC...">${App.escapeHtml(s.body_template || '')}</textarea>
-                    <p style="color:var(--text-muted);font-size:0.8rem;margin-top:4px;">Usa il tag <code>&lt;REMI&gt;</code> per inserire i codici REMI nel testo.</p>
+                    <details style="margin-top:8px;">
+                        <summary style="color:var(--text-muted);font-size:0.8rem;cursor:pointer;user-select:none;">Tag disponibili per le sostituzioni</summary>
+                        <div style="margin-top:8px;overflow-x:auto;">
+                            <table style="width:100%;font-size:0.8rem;border-collapse:collapse;">
+                                <thead>
+                                    <tr style="border-bottom:1px solid var(--border);">
+                                        <th style="text-align:left;padding:6px 8px;color:var(--text-muted);">Tag</th>
+                                        <th style="text-align:left;padding:6px 8px;color:var(--text-muted);">Descrizione</th>
+                                        <th style="text-align:center;padding:6px 8px;color:var(--text-muted);">Testo PEC</th>
+                                        <th style="text-align:center;padding:6px 8px;color:var(--text-muted);">Template DOCX</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr style="border-bottom:1px solid var(--border);">
+                                        <td style="padding:6px 8px;"><code>&lt;REMI&gt;</code></td>
+                                        <td style="padding:6px 8px;color:var(--text-primary);">Codici REMI (PEC: virgola; DOCX: tabella)</td>
+                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
+                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
+                                    </tr>
+                                    <tr style="border-bottom:1px solid var(--border);">
+                                        <td style="padding:6px 8px;"><code>&lt;NOME_DL&gt;</code></td>
+                                        <td style="padding:6px 8px;color:var(--text-primary);">Ragione sociale del distributore</td>
+                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
+                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
+                                    </tr>
+                                    <tr style="border-bottom:1px solid var(--border);">
+                                        <td style="padding:6px 8px;"><code>&lt;PEC_DL&gt;</code></td>
+                                        <td style="padding:6px 8px;color:var(--text-primary);">Indirizzo PEC del distributore</td>
+                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
+                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding:6px 8px;"><code>&lt;DATA_DECORRENZA&gt;</code></td>
+                                        <td style="padding:6px 8px;color:var(--text-primary);">Data decorrenza (DD/MM/YYYY)</td>
+                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
+                                        <td style="text-align:center;padding:6px 8px;color:var(--accent-green);">&#10003;</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
                 </div>
                 <div class="form-group">
                     <label>Template DOCX</label>
@@ -434,13 +474,18 @@ const InvioRemi = {
         this.renderTable();
 
         try {
-            const token = localStorage.getItem('token');
+            const token = Auth.getToken();
             const response = await fetch('/api/invio-remi/send-all', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` },
             });
 
             if (!response.ok) {
+                if (response.status === 401) {
+                    Auth.clearSession();
+                    window.location.reload();
+                    return;
+                }
                 const err = await response.json();
                 throw new Error(err.detail || 'Errore avvio invio massivo');
             }

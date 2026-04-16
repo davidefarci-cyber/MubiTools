@@ -186,7 +186,7 @@ def _replace_tags_in_document(doc: Document, replacements: dict[str, str], remi_
                         _replace_tag_in_paragraph(paragraph, tag, value)
 
 
-def _format_date(date_str: str) -> str:
+def format_date_for_display(date_str: str) -> str:
     """Converte data da YYYY-MM-DD a DD/MM/YYYY."""
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%d")
@@ -200,8 +200,8 @@ async def generate_pdf(
     pec_address: str,
     effective_date: str,
     remi_codes: list[str],
-) -> bytes:
-    """Genera un PDF dal template DOCX con i dati forniti.
+) -> tuple[bytes, str]:
+    """Genera un PDF (o DOCX se LibreOffice non disponibile) dal template DOCX.
 
     Args:
         company_name: Ragione sociale del distributore.
@@ -210,10 +210,10 @@ async def generate_pdf(
         remi_codes: Lista di codici REMI da inserire.
 
     Returns:
-        Contenuto PDF come bytes.
+        Tupla (contenuto_file, formato) dove formato è "pdf" o "docx".
 
     Raises:
-        RuntimeError: Se LibreOffice non è disponibile o la conversione fallisce.
+        RuntimeError: Se la conversione PDF fallisce.
         FileNotFoundError: Se il template DOCX non esiste.
     """
     template_path = settings_service.get_template_path()
@@ -229,7 +229,7 @@ async def generate_pdf(
         replacements = {
             "<NOME_DL>": company_name,
             "<PEC_DL>": pec_address,
-            "<DATA_DECORRENZA>": _format_date(effective_date),
+            "<DATA_DECORRENZA>": format_date_for_display(effective_date),
         }
 
         _replace_tags_in_document(doc, replacements, remi_codes)
@@ -238,12 +238,15 @@ async def generate_pdf(
         tmp_docx = os.path.join(tmp_dir, "document.docx")
         doc.save(tmp_docx)
 
-        # Verifica disponibilità LibreOffice
-        soffice_path = shutil.which("soffice")
+        # Verifica disponibilità LibreOffice (prova entrambi i nomi binario)
+        soffice_path = shutil.which("soffice") or shutil.which("libreoffice")
         if not soffice_path:
-            raise RuntimeError(
-                "Impossibile generare il PDF: LibreOffice non disponibile"
+            logger.warning(
+                "LibreOffice non trovato: il documento verrà allegato come DOCX"
             )
+            with open(tmp_docx, "rb") as f:
+                docx_bytes = f.read()
+            return (docx_bytes, "docx")
 
         # Converti in PDF con LibreOffice headless
         process = await asyncio.create_subprocess_exec(
@@ -274,7 +277,7 @@ async def generate_pdf(
         with open(tmp_pdf, "rb") as f:
             pdf_bytes = f.read()
 
-        return pdf_bytes
+        return (pdf_bytes, "pdf")
 
     finally:
         # Pulizia file temporanei
