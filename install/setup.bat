@@ -222,11 +222,45 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 echo   OK - Dipendenze installate
-echo.
-echo   NOTA: LibreOffice e' necessario per la generazione PDF nel modulo Invio REMI.
-echo   Se non gia' presente, installare manualmente da https://www.libreoffice.org
-echo.
 echo [%date% %time%] STEP 7 OK - Dipendenze installate >> "%LOG_FILE%"
+
+REM ─── STEP 7b: Verifica LibreOffice (soffice.exe) ───────────
+echo.
+echo [STEP 7b] Verifica LibreOffice per generazione PDF...
+where soffice.exe >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   OK - soffice.exe trovato nel PATH
+    echo [%date% %time%] STEP 7b OK - soffice.exe nel PATH >> "%LOG_FILE%"
+) else (
+    REM Controlla i percorsi di installazione comuni
+    set "SOFFICE_FOUND="
+    if exist "C:\Program Files\LibreOffice\program\soffice.exe" set "SOFFICE_FOUND=C:\Program Files\LibreOffice\program"
+    if exist "C:\Program Files (x86)\LibreOffice\program\soffice.exe" set "SOFFICE_FOUND=C:\Program Files (x86)\LibreOffice\program"
+
+    if defined SOFFICE_FOUND (
+        echo   LibreOffice trovato in: !SOFFICE_FOUND!
+        echo   Aggiunta al PATH di sistema...
+        setx PATH "%PATH%;!SOFFICE_FOUND!" /M >nul 2>&1
+        set "PATH=%PATH%;!SOFFICE_FOUND!"
+        echo   OK - soffice.exe aggiunto al PATH
+        echo [%date% %time%] STEP 7b OK - soffice.exe aggiunto al PATH da !SOFFICE_FOUND! >> "%LOG_FILE%"
+    ) else (
+        echo.
+        echo   ============================================================
+        echo   ATTENZIONE: LibreOffice NON trovato!
+        echo   ============================================================
+        echo   Il modulo Invio REMI richiede LibreOffice per generare i PDF.
+        echo   Senza LibreOffice l'invio PEC con allegato PDF non funzionera'.
+        echo.
+        echo   Installare LibreOffice da: https://www.libreoffice.org/download
+        echo   Dopo l'installazione rilanciare questo setup oppure aggiungere
+        echo   manualmente al PATH di sistema la cartella:
+        echo     C:\Program Files\LibreOffice\program
+        echo   ============================================================
+        echo.
+        echo [%date% %time%] WARNING: LibreOffice non trovato >> "%LOG_FILE%"
+    )
+)
 
 REM ─── STEP 8: Download e configurazione NSSM ─────────────────
 echo.
