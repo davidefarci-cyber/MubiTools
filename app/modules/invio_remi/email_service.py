@@ -25,20 +25,20 @@ async def send_pec(
     to_address: str,
     subject: str,
     body: str,
-    pdf_attachment: bytes,
+    attachment: bytes,
     attachment_filename: str,
     *,
     db: Session,
 ) -> dict:
-    """Invia una PEC con allegato PDF tramite SMTP Aruba.
+    """Invia una PEC con allegato (PDF o DOCX) tramite SMTP Aruba.
 
     Args:
         pec_account_id: ID dell'account PEC da usare.
         to_address: Indirizzo email destinatario.
         subject: Oggetto dell'email.
         body: Corpo dell'email (testo semplice).
-        pdf_attachment: Contenuto binario del PDF da allegare.
-        attachment_filename: Nome del file PDF allegato.
+        attachment: Contenuto binario del file da allegare (PDF o DOCX).
+        attachment_filename: Nome del file allegato.
         db: Sessione database per recuperare l'account PEC.
 
     Returns:
@@ -63,15 +63,20 @@ async def send_pec(
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-    # Allega il PDF
-    pdf_part = MIMEBase("application", "pdf")
-    pdf_part.set_payload(pdf_attachment)
-    encoders.encode_base64(pdf_part)
-    pdf_part.add_header(
+    # Allega il file (PDF o DOCX)
+    if attachment_filename.lower().endswith(".docx"):
+        mime_sub = "vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else:
+        mime_sub = "pdf"
+
+    file_part = MIMEBase("application", mime_sub)
+    file_part.set_payload(attachment)
+    encoders.encode_base64(file_part)
+    file_part.add_header(
         "Content-Disposition",
         f'attachment; filename="{attachment_filename}"',
     )
-    msg.attach(pdf_part)
+    msg.attach(file_part)
 
     try:
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as smtp:

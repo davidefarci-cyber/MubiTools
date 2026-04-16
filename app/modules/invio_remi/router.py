@@ -15,7 +15,7 @@ from app.auth.dependencies import get_current_user
 from app.database import get_db
 from app.models import RemiPractice, User, log_audit
 from app.modules.invio_remi import email_service, settings_service
-from app.modules.invio_remi.pdf_service import generate_pdf
+from app.modules.invio_remi.pdf_service import format_date_for_display, generate_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +178,7 @@ async def send_all(
             yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'generating_pdf'})}\n\n"
 
             try:
-                pdf_bytes = await generate_pdf(
+                file_bytes, file_format = await generate_pdf(
                     company_name=company_name,
                     pec_address=pec_address,
                     effective_date=effective_date,
@@ -186,7 +186,7 @@ async def send_all(
                 )
             except Exception as exc:
                 error_msg = str(exc)
-                logger.exception("Errore generazione PDF per DL %s", vat_number)
+                logger.exception("Errore generazione documento per DL %s", vat_number)
                 # Aggiorna stato pratiche
                 for p in dl_practices:
                     p.status = "error"
@@ -201,17 +201,23 @@ async def send_all(
             yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'sending'})}\n\n"
 
             try:
-                # Costruisci corpo PEC con sostituzione <REMI>
-                body = body_template.replace("<REMI>", ", ".join(remi_codes))
+                # Costruisci corpo PEC con sostituzione tag
+                formatted_date = format_date_for_display(effective_date)
+                body = body_template
+                body = body.replace("<REMI>", ", ".join(remi_codes))
+                body = body.replace("<NOME_DL>", company_name)
+                body = body.replace("<PEC_DL>", pec_address)
+                body = body.replace("<DATA_DECORRENZA>", formatted_date)
 
-                attachment_filename = f"REMI_{vat_number}.pdf"
+                file_ext = "pdf" if file_format == "pdf" else "docx"
+                attachment_filename = f"REMI_{vat_number}.{file_ext}"
 
                 result = await email_service.send_pec(
                     pec_account_id=pec_account_id,
                     to_address=pec_address,
                     subject=subject,
                     body=body,
-                    pdf_attachment=pdf_bytes,
+                    attachment=file_bytes,
                     attachment_filename=attachment_filename,
                     db=db,
                 )
