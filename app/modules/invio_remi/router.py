@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 from app.auth.dependencies import get_current_user
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import DlRegistry, RemiPractice, User, log_audit
 from app.modules.invio_remi import email_service, settings_service
 from app.modules.invio_remi.pdf_service import format_date_for_display, generate_pdf
@@ -203,118 +203,153 @@ async def send_all(
     if not practices:
         raise HTTPException(status_code=400, detail="Nessuna pratica in attesa di invio")
 
-    # Aggrega per vat_number
-    groups: dict[str, list[RemiPractice]] = {}
+    # Prepara dati serializzati per il generatore (NO oggetti ORM che
+    # diventerebbero detached dopo la chiusura della sessione Depends).
+    groups_data: dict[str, dict] = {}
     for p in practices:
-        groups.setdefault(p.vat_number, []).append(p)
+        key = p.vat_number
+        if key not in groups_data:
+            groups_data[key] = {
+                "vat_number": p.vat_number,
+                "company_name": p.company_name,
+                "pec_address": p.pec_address,
+                "effective_date": p.effective_date.isoformat() if p.effective_date else "",
+                "remi_codes": [],
+                "practice_ids": [],
+            }
+        groups_data[key]["remi_codes"].append(p.remi_code)
+        groups_data[key]["practice_ids"].append(p.id)
 
     send_batch_id = str(uuid.uuid4())
     user_id = current_user.id
 
     async def event_stream():
+        # Sessione indipendente: la sessione da Depends viene chiusa quando
+        # l'endpoint ritorna la StreamingResponse, prima che il generatore
+        # inizi ad eseguire.  Usando SessionLocal() il ciclo di vita è
+        # controllato interamente dal generatore.
+        gen_db = SessionLocal()
         sent_count = 0
         error_count = 0
 
-        for vat_number, dl_practices in groups.items():
-            first = dl_practices[0]
-            company_name = first.company_name
-            pec_address = first.pec_address
-            effective_date = first.effective_date.isoformat() if first.effective_date else ""
-            remi_codes = [p.remi_code for p in dl_practices]
+        try:
+            for vat_number, group_info in groups_data.items():
+                company_name = group_info["company_name"]
+                pec_address = group_info["pec_address"]
+                effective_date = group_info["effective_date"]
+                remi_codes = group_info["remi_codes"]
+                practice_ids = group_info["practice_ids"]
 
-            # Stato: generazione PDF
-            yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'generating_pdf'})}\n\n"
+                # Stato: generazione PDF
+                yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'generating_pdf'})}\n\n"
 
-            try:
-                file_bytes, file_format = await generate_pdf(
-                    company_name=company_name,
-                    pec_address=pec_address,
-                    effective_date=effective_date,
-                    remi_codes=remi_codes,
-                )
-            except Exception as exc:
-                error_msg = str(exc)
-                logger.exception("Errore generazione documento per DL %s", vat_number)
-                # Aggiorna stato pratiche
-                for p in dl_practices:
-                    p.status = "error"
-                    p.error_detail = f"Errore generazione PDF: {error_msg}"
-                    p.send_batch_id = send_batch_id
-                db.commit()
-                error_count += 1
-                yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'error', 'error': error_msg})}\n\n"
-                continue
-
-            # Stato: invio PEC
-            yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'sending'})}\n\n"
-
-            try:
-                # Costruisci corpo PEC con sostituzione tag
-                formatted_date = format_date_for_display(effective_date)
-                body = body_template
-                body = body.replace("<REMI>", ", ".join(remi_codes))
-                body = body.replace("<NOME_DL>", company_name)
-                body = body.replace("<PEC_DL>", pec_address)
-                body = body.replace("<DATA_DECORRENZA>", formatted_date)
-
-                file_ext = "pdf" if file_format == "pdf" else "docx"
-                attachment_filename = f"REMI_{vat_number}.{file_ext}"
-
-                result = await email_service.send_pec(
-                    pec_account_id=pec_account_id,
-                    to_address=pec_address,
-                    subject=subject,
-                    body=body,
-                    attachment=file_bytes,
-                    attachment_filename=attachment_filename,
-                    db=db,
-                )
-
-                now = datetime.now(timezone.utc)
-
-                if result.get("success"):
-                    for p in dl_practices:
-                        p.status = "sent"
-                        p.sent_at = now
-                        p.send_batch_id = send_batch_id
-                    db.commit()
-                    sent_count += 1
-                    yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'sent'})}\n\n"
-                else:
-                    error_msg = result.get("error", "Errore sconosciuto")
+                try:
+                    file_bytes, file_format = await generate_pdf(
+                        company_name=company_name,
+                        pec_address=pec_address,
+                        effective_date=effective_date,
+                        remi_codes=remi_codes,
+                    )
+                except Exception as exc:
+                    error_msg = str(exc)
+                    logger.exception("Errore generazione documento per DL %s", vat_number)
+                    dl_practices = (
+                        gen_db.query(RemiPractice)
+                        .filter(RemiPractice.id.in_(practice_ids))
+                        .all()
+                    )
                     for p in dl_practices:
                         p.status = "error"
-                        p.error_detail = error_msg
+                        p.error_detail = f"Errore generazione PDF: {error_msg}"
                         p.send_batch_id = send_batch_id
-                    db.commit()
+                    gen_db.commit()
+                    error_count += 1
+                    yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'error', 'error': error_msg})}\n\n"
+                    continue
+
+                # Stato: invio PEC
+                yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'sending'})}\n\n"
+
+                try:
+                    # Costruisci corpo PEC con sostituzione tag
+                    formatted_date = format_date_for_display(effective_date)
+                    body = body_template
+                    body = body.replace("<REMI>", ", ".join(remi_codes))
+                    body = body.replace("<NOME_DL>", company_name)
+                    body = body.replace("<PEC_DL>", pec_address)
+                    body = body.replace("<DATA_DECORRENZA>", formatted_date)
+
+                    file_ext = "pdf" if file_format == "pdf" else "docx"
+                    attachment_filename = f"REMI_{vat_number}.{file_ext}"
+
+                    result = await email_service.send_pec(
+                        pec_account_id=pec_account_id,
+                        to_address=pec_address,
+                        subject=subject,
+                        body=body,
+                        attachment=file_bytes,
+                        attachment_filename=attachment_filename,
+                        db=gen_db,
+                    )
+
+                    now = datetime.now(timezone.utc)
+
+                    dl_practices = (
+                        gen_db.query(RemiPractice)
+                        .filter(RemiPractice.id.in_(practice_ids))
+                        .all()
+                    )
+
+                    if result.get("success"):
+                        for p in dl_practices:
+                            p.status = "sent"
+                            p.sent_at = now
+                            p.send_batch_id = send_batch_id
+                        gen_db.commit()
+                        sent_count += 1
+                        yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'sent'})}\n\n"
+                    else:
+                        error_msg = result.get("error", "Errore sconosciuto")
+                        for p in dl_practices:
+                            p.status = "error"
+                            p.error_detail = error_msg
+                            p.send_batch_id = send_batch_id
+                        gen_db.commit()
+                        error_count += 1
+                        yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'error', 'error': error_msg})}\n\n"
+
+                except Exception as exc:
+                    error_msg = str(exc)
+                    logger.exception("Errore invio PEC per DL %s", vat_number)
+                    dl_practices = (
+                        gen_db.query(RemiPractice)
+                        .filter(RemiPractice.id.in_(practice_ids))
+                        .all()
+                    )
+                    for p in dl_practices:
+                        p.status = "error"
+                        p.error_detail = f"Errore invio: {error_msg}"
+                        p.send_batch_id = send_batch_id
+                    gen_db.commit()
                     error_count += 1
                     yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'error', 'error': error_msg})}\n\n"
 
-            except Exception as exc:
-                error_msg = str(exc)
-                logger.exception("Errore invio PEC per DL %s", vat_number)
-                for p in dl_practices:
-                    p.status = "error"
-                    p.error_detail = f"Errore invio: {error_msg}"
-                    p.send_batch_id = send_batch_id
-                db.commit()
-                error_count += 1
-                yield f"data: {json.dumps({'vat_number': vat_number, 'status': 'error', 'error': error_msg})}\n\n"
+            # Audit log
+            log_audit(
+                gen_db, "remi_send_all",
+                user_id=user_id,
+                detail={
+                    "send_batch_id": send_batch_id,
+                    "sent": sent_count,
+                    "errors": error_count,
+                    "total_dl": len(groups_data),
+                },
+            )
 
-        # Audit log
-        log_audit(
-            db, "remi_send_all",
-            user_id=user_id,
-            detail={
-                "send_batch_id": send_batch_id,
-                "sent": sent_count,
-                "errors": error_count,
-                "total_dl": len(groups),
-            },
-        )
-
-        # Evento finale
-        yield f"data: {json.dumps({'type': 'complete', 'sent': sent_count, 'errors': error_count})}\n\n"
+            # Evento finale
+            yield f"data: {json.dumps({'type': 'complete', 'sent': sent_count, 'errors': error_count})}\n\n"
+        finally:
+            gen_db.close()
 
     return StreamingResponse(
         event_stream(),

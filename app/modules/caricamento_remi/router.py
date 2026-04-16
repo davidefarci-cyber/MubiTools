@@ -16,6 +16,8 @@ from app.modules.caricamento_remi.schemas import (
     DlRegistryCreate,
     DlRegistryOut,
     DlRegistryUpdate,
+    RemiChangeStatusRequest,
+    RemiChangeStatusResponse,
     RemiConfirmRequest,
     RemiConfirmResponse,
     RemiHistoryItem,
@@ -390,12 +392,14 @@ def get_history(
     items: list[RemiHistoryItem] = []
     for (_vat, _date, _batch), group in groups.items():
         first = group[0]
-        # Lo stato del gruppo è il peggiore: error > pending > sent
+        # Lo stato del gruppo è il peggiore: error > pending > cancelled > sent
         statuses = {p.status for p in group}
         if "error" in statuses:
             group_status = "error"
         elif "pending" in statuses:
             group_status = "pending"
+        elif "cancelled" in statuses:
+            group_status = "cancelled"
         else:
             group_status = "sent"
 
@@ -439,6 +443,7 @@ def get_stats(
     pending = db.query(RemiPractice).filter(RemiPractice.status == "pending").count()
     sent = db.query(RemiPractice).filter(RemiPractice.status == "sent").count()
     errors = db.query(RemiPractice).filter(RemiPractice.status == "error").count()
+    cancelled = db.query(RemiPractice).filter(RemiPractice.status == "cancelled").count()
 
     last_sent = (
         db.query(RemiPractice.sent_at)
@@ -453,6 +458,7 @@ def get_stats(
         pending=pending,
         sent=sent,
         errors=errors,
+        cancelled=cancelled,
         last_send_date=last_send_date,
     )
 
@@ -496,3 +502,64 @@ def resend_practices(
         current_user.username,
     )
     return RemiResendResponse(updated=len(practices))
+
+
+# Transizioni di stato ammesse: {stato_corrente: {stati_destinazione}}
+_ALLOWED_TRANSITIONS: dict[str, set[str]] = {
+    "pending": {"cancelled"},
+    "cancelled": {"pending"},
+    "sent": {"pending"},
+}
+
+
+@router.post("/history/change-status", response_model=RemiChangeStatusResponse)
+def change_practice_status(
+    data: RemiChangeStatusRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> RemiChangeStatusResponse:
+    """Cambia lo stato di un gruppo di pratiche REMI (transizioni validate)."""
+    _require_module(current_user)
+
+    new_status = data.new_status
+    if new_status not in {"pending", "cancelled"}:
+        raise HTTPException(status_code=400, detail=f"Stato destinazione non valido: {new_status}")
+
+    practices = (
+        db.query(RemiPractice)
+        .filter(RemiPractice.id.in_(data.practice_ids))
+        .all()
+    )
+
+    updated = []
+    for p in practices:
+        allowed = _ALLOWED_TRANSITIONS.get(p.status, set())
+        if new_status not in allowed:
+            continue
+        p.status = new_status
+        if new_status == "pending":
+            p.error_detail = None
+            p.send_batch_id = None
+            p.sent_at = None
+        updated.append(p)
+
+    db.commit()
+
+    log_audit(
+        db,
+        "remi_change_status",
+        user_id=current_user.id,
+        detail={
+            "practice_ids": [p.id for p in updated],
+            "new_status": new_status,
+            "count": len(updated),
+        },
+    )
+
+    logger.info(
+        "Cambio stato REMI: %d pratiche → %s — utente %s",
+        len(updated),
+        new_status,
+        current_user.username,
+    )
+    return RemiChangeStatusResponse(updated=len(updated))
