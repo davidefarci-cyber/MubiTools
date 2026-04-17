@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # Admin iniziale
     ADMIN_USERNAME: str = "admin"
-    ADMIN_PASSWORD: str = "changeme"
+    ADMIN_PASSWORD: str
 
     # Database
     DATABASE_URL: str = f"sqlite:///{BASE_DIR / 'database' / 'app.db'}"
