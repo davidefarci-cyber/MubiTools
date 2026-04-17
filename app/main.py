@@ -1,19 +1,11 @@
 """MUBI Tools — FastAPI entrypoint."""
 
 import logging
-import sys
 import time
-from contextlib import asynccontextmanager
-from pathlib import Path
-
-# Aggiungi root del progetto al path per importare scripts/
-_project_root = Path(__file__).resolve().parent.parent
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
 from collections.abc import AsyncGenerator
-from pathlib import Path
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -95,9 +87,15 @@ app.include_router(connessione_router, prefix="/api/connessione", tags=["conness
 app.include_router(invio_remi_router, prefix="/api/invio-remi", tags=["invio-remi"])
 app.include_router(caricamento_remi_router, prefix="/api/caricamento-remi", tags=["caricamento-remi"])
 
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Logga le eccezioni non gestite con traceback e risponde 500 generico."""
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
 # File statici
-static_dir = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
+app.mount("/static", StaticFiles(directory=settings.STATIC_DIR), name="static")
 
 
 @app.get("/health")
@@ -118,4 +116,4 @@ async def root() -> JSONResponse:
     """Redirect alla SPA."""
     from fastapi.responses import FileResponse
 
-    return FileResponse(static_dir / "index.html")
+    return FileResponse(settings.STATIC_DIR / "index.html")

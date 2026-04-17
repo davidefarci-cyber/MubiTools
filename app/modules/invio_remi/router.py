@@ -12,7 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, require_module
 from app.database import SessionLocal, get_db
 from app.models import DlRegistry, RemiPractice, User, log_audit
 from app.modules.caricamento_remi.service import validate_partita_iva
@@ -35,12 +35,6 @@ MODULE_NAME = "invio_remi"
 
 # Regex per validazione formato email/PEC
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
-def _require_module(user: User) -> None:
-    """Verifica che l'utente abbia accesso al modulo."""
-    if not user.has_module(MODULE_NAME):
-        raise HTTPException(status_code=403, detail="Modulo non abilitato")
 
 
 @router.get("/settings")
@@ -389,11 +383,10 @@ async def send_all(
 @router.get("/registry", response_model=list[DlRegistryOut])
 def list_registry(
     search: str | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> list[DlRegistryOut]:
     """Lista distributori locali con filtro testo opzionale."""
-    _require_module(current_user)
 
     query = db.query(DlRegistry)
     if search:
@@ -410,11 +403,10 @@ def list_registry(
 @router.post("/registry", response_model=DlRegistryOut, status_code=201)
 def create_registry(
     data: DlRegistryCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> DlRegistryOut:
     """Crea un nuovo distributore locale."""
-    _require_module(current_user)
 
     if not validate_partita_iva(data.vat_number):
         raise HTTPException(status_code=400, detail="Partita IVA non valida")
@@ -455,11 +447,10 @@ def create_registry(
 def update_registry(
     dl_id: int,
     data: DlRegistryUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> DlRegistryOut:
     """Modifica un distributore locale esistente."""
-    _require_module(current_user)
 
     dl = db.query(DlRegistry).filter(DlRegistry.id == dl_id).first()
     if not dl:
@@ -503,11 +494,10 @@ def update_registry(
 @router.delete("/registry/{dl_id}")
 def deactivate_registry(
     dl_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> dict:
     """Disattiva un distributore locale (soft delete)."""
-    _require_module(current_user)
 
     dl = db.query(DlRegistry).filter(DlRegistry.id == dl_id).first()
     if not dl:
@@ -545,11 +535,10 @@ def deactivate_registry(
 @router.put("/registry/{dl_id}/reactivate", response_model=DlRegistryOut)
 def reactivate_registry(
     dl_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> DlRegistryOut:
     """Riattiva un distributore locale precedentemente disattivato."""
-    _require_module(current_user)
 
     dl = db.query(DlRegistry).filter(DlRegistry.id == dl_id).first()
     if not dl:
@@ -577,11 +566,10 @@ def reactivate_registry(
 @router.post("/registry/bulk", response_model=DlRegistryBulkResponse)
 def bulk_create_registry(
     rows: list[DlRegistryBulkRow],
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> DlRegistryBulkResponse:
     """Caricamento massivo distributori locali da incolla Excel."""
-    _require_module(current_user)
 
     if not rows:
         raise HTTPException(status_code=400, detail="Nessuna riga da elaborare")

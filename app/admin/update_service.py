@@ -8,11 +8,11 @@ from pathlib import Path
 
 import git
 
-from app.config import settings
+from app.config import BASE_DIR, settings
 
 logger = logging.getLogger(__name__)
 
-REPO_PATH = Path(__file__).resolve().parent.parent.parent
+REPO_PATH = BASE_DIR
 SERVICE_NAME = "mubi-tools"
 REQUIREMENTS = REPO_PATH / "requirements.txt"
 
