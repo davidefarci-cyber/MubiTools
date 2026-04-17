@@ -5,7 +5,7 @@ import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -86,6 +86,13 @@ app.include_router(incassi_router, prefix="/api/incassi", tags=["incassi"])
 app.include_router(connessione_router, prefix="/api/connessione", tags=["connessione"])
 app.include_router(invio_remi_router, prefix="/api/invio-remi", tags=["invio-remi"])
 app.include_router(caricamento_remi_router, prefix="/api/caricamento-remi", tags=["caricamento-remi"])
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Logga le eccezioni non gestite con traceback e risponde 500 generico."""
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 # File statici
 app.mount("/static", StaticFiles(directory=settings.STATIC_DIR), name="static")
