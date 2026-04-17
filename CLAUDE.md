@@ -80,22 +80,58 @@ curl http://127.0.0.1:8000/health
 
 ## Test
 
-**Al momento non esiste una test suite.** Quando si iniziano a scrivere test:
+Esiste una test suite smoke minima in `tests/`. Stack: `pytest` +
+`pytest-asyncio` + `httpx` (via `fastapi.testclient.TestClient`). Config in
+`pyproject.toml` (`[tool.pytest.ini_options]`, `testpaths = ["tests"]`).
 
-- Directory `tests/` nella root, mirror della struttura `app/`
-  (`tests/modules/caricamento_remi/test_service.py`, ecc.).
-- Stack suggerito: `pytest` + `httpx.AsyncClient` / `TestClient` FastAPI +
-  SQLite in-memory (override `get_db` con una fixture).
-- Aggiungere `pytest` a `requirements.txt` (o a un `requirements-dev.txt`).
-- Comando: `pytest -q` dalla root.
+Comando: `pytest -q` dalla root del repo.
 
-Finché non c'è suite, la verifica minima manuale è:
+### Struttura
 
-```bash
-ADMIN_PASSWORD=test python -c "from app.main import app; print('OK')"
-ADMIN_PASSWORD=test uvicorn app.main:app --port 8765 &
-curl -s http://127.0.0.1:8765/health
 ```
+tests/
+├── __init__.py
+├── conftest.py         # fixture: client, auth_headers; env setup pre-import
+├── test_health.py      # GET /health
+├── test_auth.py        # login wrong/ok, /auth/first-boot pubblico
+├── test_admin.py       # /admin/users senza/con auth
+└── modules/
+    ├── __init__.py
+    ├── test_incassi_mubi.py
+    ├── test_connessione.py
+    ├── test_invio_remi.py
+    ├── test_caricamento_remi.py
+    └── test_caricamento_remi_validate.py  # unit pura su validate_partita_iva
+```
+
+Regola di naming: i file di test sono mirror del path in `app/` (es. un
+futuro test per `app/modules/incassi_mubi/service.py` va in
+`tests/modules/incassi_mubi/test_service.py`).
+
+### Fixture (in `tests/conftest.py`)
+
+- `client` — `TestClient(app)` con `lifespan` attivo (crea tabelle + admin).
+  Scope: session.
+- `auth_headers` — header `Authorization: Bearer <jwt>` per l'admin di test.
+  Scope: session.
+
+Setup env **prima** di importare `app.*`:
+- `ADMIN_PASSWORD=testadmin123` (required da `Settings`);
+- `DATABASE_URL` → SQLite su tempfile (pulito a fine sessione).
+
+Motivo: `app.config.settings` è istanziato a import time e
+`app.database.engine` è creato dal valore di `settings.DATABASE_URL` a module
+load. Le env vars vanno settate nel top di `conftest.py`, prima di ogni
+`from app...`.
+
+### Convenzioni
+
+- Endpoint senza Authorization header → asserire `status_code in (401, 403)`:
+  `HTTPBearer(auto_error=True)` di FastAPI risponde **403** quando l'header
+  manca, mentre `get_current_user` risponde **401** su token invalido.
+- Oggi la suite è volutamente smoke-only (scope: garantire che l'app si
+  avvii e che gli endpoint protetti rifiutino richieste anonime). Test più
+  granulari su parsing Excel / PDF / PEC verranno aggiunti dopo i refactor.
 
 ## Aggiungere un nuovo modulo
 
