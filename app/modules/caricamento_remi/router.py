@@ -8,7 +8,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import require_module
 from app.database import get_db
 from app.models import DlRegistry, RemiPractice, User, log_audit
 from app.modules.caricamento_remi.schemas import (
@@ -32,23 +32,16 @@ router = APIRouter()
 MODULE_NAME = "caricamento_remi"
 
 
-def _require_module(user: User) -> None:
-    """Verifica che l'utente abbia accesso al modulo."""
-    if not user.has_module(MODULE_NAME):
-        raise HTTPException(status_code=403, detail="Modulo non abilitato")
-
-
 # --- Caricamento pratiche REMI ---
 
 
 @router.post("/match", response_model=list[RemiMatchResult])
 def match_practices(
     rows: list[RemiMatchRow],
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> list[RemiMatchResult]:
     """Esegue il match delle P.IVA contro l'anagrafica distributori attivi."""
-    _require_module(current_user)
 
     results: list[RemiMatchResult] = []
     for row in rows:
@@ -91,11 +84,10 @@ def match_practices(
 @router.post("/confirm", response_model=RemiConfirmResponse)
 def confirm_practices(
     data: RemiConfirmRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> RemiConfirmResponse:
     """Conferma e inserisce le pratiche REMI nel database."""
-    _require_module(current_user)
 
     batch_id = str(uuid.uuid4())
     inserted = 0
@@ -155,11 +147,10 @@ def get_history(
     date_to: date | None = None,
     page: int = 1,
     page_size: int = 50,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> RemiHistoryResponse:
     """Storico pratiche REMI aggregato per DL + batch di invio, con filtri e paginazione."""
-    _require_module(current_user)
 
     query = db.query(RemiPractice)
 
@@ -229,11 +220,10 @@ def get_history(
 
 @router.get("/history/stats", response_model=RemiStatsResponse)
 def get_stats(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> RemiStatsResponse:
     """Statistiche riepilogative delle pratiche REMI."""
-    _require_module(current_user)
 
     total = db.query(RemiPractice).count()
     pending = db.query(RemiPractice).filter(RemiPractice.status == "pending").count()
@@ -262,11 +252,10 @@ def get_stats(
 @router.post("/history/resend", response_model=RemiResendResponse)
 def resend_practices(
     data: RemiResendRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> RemiResendResponse:
     """Reimposta le pratiche in errore a stato pending per il reinvio."""
-    _require_module(current_user)
 
     practices = (
         db.query(RemiPractice)
@@ -311,11 +300,10 @@ _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
 @router.post("/history/change-status", response_model=RemiChangeStatusResponse)
 def change_practice_status(
     data: RemiChangeStatusRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_module(MODULE_NAME)),
     db: Session = Depends(get_db),
 ) -> RemiChangeStatusResponse:
     """Cambia lo stato di un gruppo di pratiche REMI (transizioni validate)."""
-    _require_module(current_user)
 
     new_status = data.new_status
     if new_status not in {"pending", "cancelled"}:
