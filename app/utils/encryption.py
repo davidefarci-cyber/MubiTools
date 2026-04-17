@@ -1,11 +1,10 @@
 """Cifratura password PEC con Fernet (symmetric encryption)."""
 
-from pathlib import Path
-
 from cryptography.fernet import Fernet
 
-_BASE_DIR = Path(__file__).resolve().parent.parent.parent
-_KEY_PATH = _BASE_DIR / "data" / "secret.key"
+from app.config import BASE_DIR
+
+_KEY_PATH = BASE_DIR / "data" / "secret.key"
 
 _fernet: Fernet | None = None
 

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.admin import service as admin_service
 from app.admin import update_service
 from app.auth.dependencies import require_admin
-from app.config import BASE_DIR
+from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
 from app.models import AuditLog, PecAccount, User, log_audit
 from app.utils.encryption import decrypt_password, encrypt_password
@@ -438,7 +438,6 @@ def apply_update(
 # --- Backup / Restore Database ---
 
 _DB_PATH = Path(str(engine.url).replace("sqlite:///", ""))
-_BACKUPS_DIR = BASE_DIR / "data" / "backups"
 
 
 @router.get("/db/backup")
@@ -450,10 +449,10 @@ def backup_database(
     if not _DB_PATH.exists():
         raise HTTPException(status_code=404, detail="File database non trovato")
 
-    _BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    settings.BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"mubi_backup_{ts}.db"
-    backup_path = _BACKUPS_DIR / filename
+    backup_path = settings.BACKUPS_DIR / filename
 
     # Usa backup API di SQLite per un dump consistente
     src_conn = sqlite3.connect(str(_DB_PATH))
@@ -487,8 +486,8 @@ async def restore_database(
         raise HTTPException(status_code=400, detail="Il file deve avere estensione .db")
 
     # Salva il file caricato in una posizione temporanea
-    _BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_path = _BACKUPS_DIR / "restore_upload.tmp"
+    settings.BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = settings.BACKUPS_DIR / "restore_upload.tmp"
     content = await file.read()
     tmp_path.write_bytes(content)
 
@@ -514,7 +513,7 @@ async def restore_database(
     # Backup automatico del DB corrente prima di sovrascrivere
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     auto_backup_name = f"mubi_pre_restore_{ts}.db"
-    auto_backup_path = _BACKUPS_DIR / auto_backup_name
+    auto_backup_path = settings.BACKUPS_DIR / auto_backup_name
     if _DB_PATH.exists():
         shutil.copy2(str(_DB_PATH), str(auto_backup_path))
 
@@ -545,10 +544,10 @@ def reinit_database(
     di default (altrimenti il DB resterebbe senza utenti e nessuno potrebbe
     più autenticarsi fino al prossimo restart del servizio).
     """
-    _BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    settings.BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     auto_backup_name = f"mubi_pre_reinit_{ts}.db"
-    auto_backup_path = _BACKUPS_DIR / auto_backup_name
+    auto_backup_path = settings.BACKUPS_DIR / auto_backup_name
     if _DB_PATH.exists():
         shutil.copy2(str(_DB_PATH), str(auto_backup_path))
 
@@ -579,10 +578,10 @@ def reinit_database(
 @router.get("/db/has-backups")
 def has_backups(admin: User = Depends(require_admin)) -> dict:
     """Controlla se esistono backup precedenti nella cartella data/backups/."""
-    if not _BACKUPS_DIR.exists():
+    if not settings.BACKUPS_DIR.exists():
         return {"has_backups": False, "files": []}
     files = sorted(
-        [f.name for f in _BACKUPS_DIR.glob("*.db")],
+        [f.name for f in settings.BACKUPS_DIR.glob("*.db")],
         reverse=True,
     )
     return {"has_backups": len(files) > 0, "files": files[:10]}

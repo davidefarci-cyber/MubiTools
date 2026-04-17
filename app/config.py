@@ -36,7 +36,9 @@ class Settings(BaseSettings):
 
     # Paths
     UPLOAD_DIR: Path = BASE_DIR / "data" / "uploads"
+    BACKUPS_DIR: Path = BASE_DIR / "data" / "backups"
     LOG_DIR: Path = BASE_DIR / "logs"
+    STATIC_DIR: Path = BASE_DIR / "app" / "static"
     VERSION_FILE: Path = BASE_DIR / "VERSION"
 
     model_config = {"env_file": BASE_DIR / ".env", "env_file_encoding": "utf-8"}
