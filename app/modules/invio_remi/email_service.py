@@ -1,6 +1,7 @@
-"""Servizio di invio PEC con allegato PDF via SMTP Aruba."""
+"""Servizio di invio PEC con allegato PDF via SMTP Aruba + validazione email."""
 
 import logging
+import re
 import smtplib
 from email import encoders
 from email.mime.base import MIMEBase
@@ -18,6 +19,16 @@ logger = logging.getLogger(__name__)
 SMTP_HOST = "smtps.pec.aruba.it"
 SMTP_PORT = 465
 SMTP_TIMEOUT = 30
+
+# Regex formato email/PEC. La centralizzazione in app/shared/ arriverà in una
+# sessione successiva; per ora vive qui ed è l'unica sorgente di verità usata
+# dal modulo invio_remi.
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def is_valid_email(address: str) -> bool:
+    """Verifica che ``address`` rispetti il formato email/PEC accettato."""
+    return bool(EMAIL_REGEX.match(address or ""))
 
 
 async def send_pec(
