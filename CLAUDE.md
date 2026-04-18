@@ -151,6 +151,35 @@ load. Le env vars vanno settate nel top di `conftest.py`, prima di ogni
 7. Pattern audit log: in ogni azione significativa chiamare
    `log_audit(db, "<azione>", user_id=current_user.id, detail={...})`.
 
+## Modulo `invio_remi`
+
+Esempio di modulo con sottosistemi multipli: il file `service.py` orchestra la
+business logic e delega a service specializzati per le capability trasversali
+(PDF, PEC, impostazioni su disco).
+
+- **`router.py`** — solo routing: auth, parsing `Form`/`UploadFile`,
+  `StreamingResponse` per l'SSE di `/send-all`, delega a `service`.
+- **`service.py`** — CRUD anagrafica DL (con validazione P.IVA tramite
+  `caricamento_remi.service.validate_partita_iva` + formato PEC tramite
+  `email_service.is_valid_email`), sync pratiche pending ↔ anagrafica,
+  aggregazione pending per distributore, orchestrazione `stream_send_all`
+  (async generator che yielda eventi SSE: `generating_pdf`, `sending`,
+  `sent`/`error`, `complete`). Gli errori di dominio sono segnalati con
+  `HTTPException` per mantenere thin il router (deroga consapevole alla
+  regola "no FastAPI nei service").
+- **`pdf_service.py`** — `generate_pdf(...)`: apre il template DOCX,
+  sostituisce i tag (`<NOME_DL>`, `<PEC_DL>`, `<DATA_DECORRENZA>`, `<DATA>`,
+  `<REMI>` come tabella), converte in PDF via `soffice --headless` e
+  restituisce bytes. Usa `python-docx` + OPC XML per la tabella REMI.
+  Richiede LibreOffice/Writer installato (`soffice` nel PATH).
+- **`email_service.py`** — `send_pec(...)` su `smtps.pec.aruba.it:465`
+  (SMTP_SSL + `smtplib`). Contiene anche `EMAIL_REGEX` e `is_valid_email()`:
+  unica sorgente di verità per il formato email/PEC nel modulo (la
+  centralizzazione in `app/shared/` è prevista in una sessione futura).
+- **`settings_service.py`** — persistenza JSON delle impostazioni
+  (`data/remi_settings.json`) + salvataggio/lettura del template DOCX
+  (`data/remi_template.docx`).
+
 ## Note operative
 
 - `ADMIN_PASSWORD` è **required**: pydantic-settings fallisce l'avvio se manca.
