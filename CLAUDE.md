@@ -213,6 +213,71 @@ mapping `ValueError`→`HTTPException`, response shape.
   requirements.txt`, restart servizio (systemd/sc su Windows). Nessuna
   interazione DB. Non rifattorizzare insieme a router/business logic.
 
+## Modulo `caricamento_remi`
+
+Modulo "JSON-in, JSON-out": il parsing del file `.xlsx` delle pratiche REMI
+avviene interamente lato **frontend** (JavaScript in `app/static/`), il
+backend riceve righe strutturate via schemi Pydantic. Router thin, tutta la
+logica di dominio è nel service.
+
+- **`router.py`** — solo orchestrazione HTTP: `Depends(require_module(...))`,
+  parsing richieste Pydantic, `log_audit`, logging, mapping
+  `ValueError`→`HTTPException(400)`. Nessuna query SQL né state machine.
+- **`service.py`** — tutta la logica di dominio:
+  - `match_vat_numbers(rows, db)` — lookup P.IVA in `DlRegistry` attivi.
+  - `create_practices_batch(data, db)` — inserisce pratiche (scarta righe
+    senza `company_name`), genera `batch_id` UUID, `db.commit()`.
+  - `list_practice_history(db, filtri…, page, page_size)` — query con
+    filtri (status/vat/search/date range), aggregazione per
+    `(vat_number, effective_date, batch_id)`, state machine di gruppo con
+    priorità `error > pending > cancelled > sent`, paginazione in memoria.
+  - `get_practices_stats(db)` — conteggi per status + `last_send_date`.
+  - `reset_practices_to_pending(ids, db)` — resetta pratiche `error` a
+    `pending` (azzera `error_detail`/`send_batch_id`/`sent_at`).
+  - `transition_practices_status(ids, new_status, db)` — transizioni
+    validate da `_ALLOWED_TRANSITIONS`; solleva `ValueError` su stato
+    destinazione non ammesso.
+  - `validate_partita_iva(piva)` — checksum standard italiano, riusata
+    anche da `invio_remi.service` (unica sorgente di verità; la
+    centralizzazione in `app/shared/` è prevista in futuro).
+- **`schemas.py`** — modelli Pydantic per match/confirm/history/stats/
+  resend/change-status.
+
+## Modulo `incassi_mubi`
+
+Modulo file-heavy: riceve upload `.xlsx`/`.txt`, esegue una pipeline a 6
+fasi in un thread separato con progress callback, produce file di output
+scaricabili. Il `service.py` monolitico è stato suddiviso in quattro file
+per responsabilità; l'unico simbolo importato dal router è `elabora_incassi`.
+
+- **`router.py`** — upload file, orchestrazione job async (thread + callback
+  progress in memoria), download output. Unico import dal service:
+  `elabora_incassi`.
+- **`service.py`** — orchestratore `elabora_incassi`: chiama `fase1`→`fase6`
+  in sequenza con `progress_callback`, fa validazione anticipata delle
+  colonne via `_validate_all_columns`, salva i file di output. Contiene
+  anche `salva_conferimento` (con highlight anomalie in rosso via
+  `RED_FILL`), `salva_report_anomalie`, `salva_nuove_righe`.
+- **`processor.py`** — le 6 fasi del pipeline Excel (`fase1_parse_incassi`
+  → `fase6_ordinamento_controllo`). **Modificare qui per cambiare la logica
+  di una fase esistente o aggiungere una nuova fase** (poi registrarla in
+  `elabora_incassi`).
+- **`excel_reader.py`** — lettura smart di file Excel (`_read_excel_smart`
+  auto-rileva il foglio giusto provando tutti i fogli finché trova le
+  colonne attese) + costanti `COL_*_VARIANTS` (varianti case-insensitive
+  del nome colonna). **Modificare qui per supportare un nuovo formato
+  Excel** (aggiungere varianti) o un nuovo file sorgente.
+- **`validator.py`** — normalizzazione valori (`_normalize_amount`:
+  gestisce `€`/virgole/separatori di migliaia; `_normalize_date`:
+  `dayfirst=True`) e data-quality check `_validate_all_columns` sulle
+  colonne richieste. **Modificare qui per aggiungere una regola di
+  validazione o gestire un formato valore atipico**.
+- **`schemas.py`** — modelli Pydantic per upload/process/result.
+
+Il pattern column-mapping (`COL_*_VARIANTS` + `_find_column`) è duplicato
+in `connessione/service.py`; l'unificazione in un `app/shared/` è prevista
+in una sessione futura.
+
 ## Note operative
 
 - `ADMIN_PASSWORD` è **required**: pydantic-settings fallisce l'avvio se manca.
