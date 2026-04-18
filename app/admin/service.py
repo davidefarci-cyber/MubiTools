@@ -1,7 +1,6 @@
-"""Servizi admin: CRUD utenti, aggiornamenti da GitHub."""
+"""Servizi admin: CRUD utenti, password hashing, audit log."""
 
 import json
-from datetime import datetime, timezone
 
 import bcrypt
 from sqlalchemy.orm import Session
@@ -184,6 +183,26 @@ def get_audit_log(
         .all()
     )
     return logs, total
+
+
+def delete_audit_log(
+    db: Session,
+    *,
+    deleted_by_id: int | None = None,
+) -> int:
+    """Elimina tutte le voci dell'audit log e registra l'azione.
+
+    Returns:
+        Numero di record cancellati.
+    """
+    deleted = db.query(AuditLog).delete()
+    db.commit()
+    log_audit(
+        db, "audit_log_cleared",
+        user_id=deleted_by_id,
+        detail={"deleted_entries": deleted},
+    )
+    return deleted
 
 
 def ensure_admin_exists(db: Session) -> None:

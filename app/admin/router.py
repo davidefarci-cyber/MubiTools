@@ -1,24 +1,18 @@
-"""Router pannello admin: gestione utenti, aggiornamenti, audit log, backup/restore DB, PEC."""
+"""Router pannello admin: orchestrazione thin (auth + parsing + delega)."""
 
 import logging
-import shutil
-import smtplib
-import sqlite3
-from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.admin import backup_service, pec_service
 from app.admin import service as admin_service
 from app.admin import update_service
 from app.auth.dependencies import require_admin
-from app.config import settings
-from app.database import Base, SessionLocal, engine, get_db
-from app.models import AuditLog, PecAccount, User, log_audit
-from app.utils.encryption import decrypt_password, encrypt_password
+from app.database import get_db
+from app.models import PecAccount, User, log_audit
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +110,19 @@ def _user_to_dict(u: User) -> dict:
     }
 
 
-# --- Endpoints ---
+def _pec_to_dict(pec: PecAccount) -> dict:
+    """Converte un PecAccount ORM in dict per la risposta (senza password)."""
+    return {
+        "id": pec.id,
+        "label": pec.label,
+        "email": pec.email,
+        "username": pec.username,
+        "is_active": pec.is_active,
+        "created_at": pec.created_at.isoformat() if pec.created_at else None,
+    }
+
+
+# --- Users ---
 
 @router.get("/users")
 def list_users(
@@ -135,8 +141,7 @@ def create_user(
     db: Session = Depends(get_db),
 ) -> dict:
     """Crea un nuovo utente (solo admin)."""
-    existing = admin_service.get_user_by_username(db, request.username)
-    if existing:
+    if admin_service.get_user_by_username(db, request.username):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Username '{request.username}' gia' in uso",
@@ -195,6 +200,8 @@ def reset_password(
     )
 
 
+# --- Audit log ---
+
 @router.get("/audit-log")
 def get_audit_log(
     page: int = 1,
@@ -230,30 +237,11 @@ def clear_audit_log(
     db: Session = Depends(get_db),
 ) -> dict:
     """Cancella tutte le voci dell'audit log e registra l'operazione."""
-    deleted = db.query(AuditLog).delete()
-    db.commit()
-    log_audit(
-        db, "audit_log_cleared",
-        user_id=admin.id,
-        detail={"deleted_entries": deleted},
-    )
+    deleted = admin_service.delete_audit_log(db, deleted_by_id=admin.id)
     return {"deleted": deleted}
 
 
 # --- PEC Accounts ---
-
-
-def _pec_to_dict(pec: PecAccount) -> dict:
-    """Converte un PecAccount ORM in dict per la risposta (senza password)."""
-    return {
-        "id": pec.id,
-        "label": pec.label,
-        "email": pec.email,
-        "username": pec.username,
-        "is_active": pec.is_active,
-        "created_at": pec.created_at.isoformat() if pec.created_at else None,
-    }
-
 
 @router.get("/pec")
 def list_pec(
@@ -261,8 +249,7 @@ def list_pec(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """Lista tutte le connessioni PEC configurate (password esclusa)."""
-    accounts = db.query(PecAccount).order_by(PecAccount.id).all()
-    return [_pec_to_dict(p) for p in accounts]
+    return [_pec_to_dict(p) for p in pec_service.list_pec_accounts(db)]
 
 
 @router.post("/pec", status_code=status.HTTP_201_CREATED)
@@ -272,23 +259,17 @@ def create_pec(
     db: Session = Depends(get_db),
 ) -> dict:
     """Crea una nuova connessione PEC."""
-    existing = db.query(PecAccount).filter(PecAccount.email == request.email).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Email PEC '{request.email}' gia' configurata",
+    try:
+        pec = pec_service.create_pec(
+            db,
+            label=request.label,
+            email=request.email,
+            username=request.username,
+            password=request.password,
+            created_by_id=admin.id,
         )
-    pec = PecAccount(
-        label=request.label,
-        email=request.email,
-        username=request.username,
-        encrypted_password=encrypt_password(request.password),
-        is_active=True,
-    )
-    db.add(pec)
-    db.commit()
-    db.refresh(pec)
-    log_audit(db, "pec_created", user_id=admin.id, detail={"email": pec.email, "label": pec.label})
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _pec_to_dict(pec)
 
 
@@ -300,27 +281,22 @@ def update_pec(
     db: Session = Depends(get_db),
 ) -> dict:
     """Modifica una connessione PEC. Se password e' vuota/null, non viene aggiornata."""
-    pec = db.query(PecAccount).filter(PecAccount.id == pec_id).first()
+    pec = pec_service.get_pec_by_id(db, pec_id)
     if not pec:
         raise HTTPException(status_code=404, detail="Connessione PEC non trovata")
-
-    if request.label is not None:
-        pec.label = request.label
-    if request.email is not None:
-        dup = db.query(PecAccount).filter(PecAccount.email == request.email, PecAccount.id != pec_id).first()
-        if dup:
-            raise HTTPException(status_code=409, detail=f"Email PEC '{request.email}' gia' in uso")
-        pec.email = request.email
-    if request.username is not None:
-        pec.username = request.username
-    if request.password and request.password.strip():
-        pec.encrypted_password = encrypt_password(request.password)
-    if request.is_active is not None:
-        pec.is_active = request.is_active
-
-    db.commit()
-    db.refresh(pec)
-    log_audit(db, "pec_updated", user_id=admin.id, detail={"pec_id": pec.id, "email": pec.email})
+    try:
+        pec = pec_service.update_pec(
+            db,
+            pec=pec,
+            label=request.label,
+            email=request.email,
+            username=request.username,
+            password=request.password,
+            is_active=request.is_active,
+            updated_by_id=admin.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _pec_to_dict(pec)
 
 
@@ -331,21 +307,13 @@ def delete_pec(
     db: Session = Depends(get_db),
 ) -> dict:
     """Elimina una connessione PEC (non se e' l'unica attiva)."""
-    pec = db.query(PecAccount).filter(PecAccount.id == pec_id).first()
+    pec = pec_service.get_pec_by_id(db, pec_id)
     if not pec:
         raise HTTPException(status_code=404, detail="Connessione PEC non trovata")
-
-    active_count = db.query(PecAccount).filter(PecAccount.is_active.is_(True)).count()
-    if pec.is_active and active_count <= 1:
-        raise HTTPException(
-            status_code=400,
-            detail="Impossibile eliminare l'unica connessione PEC attiva",
-        )
-
-    email = pec.email
-    db.delete(pec)
-    db.commit()
-    log_audit(db, "pec_deleted", user_id=admin.id, detail={"pec_id": pec_id, "email": email})
+    try:
+        pec_service.delete_pec(db, pec=pec, deleted_by_id=admin.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"message": "Connessione PEC eliminata"}
 
 
@@ -356,25 +324,19 @@ def test_pec(
     db: Session = Depends(get_db),
 ) -> dict:
     """Testa la connessione SMTP di un account PEC (login senza invio mail)."""
-    pec = db.query(PecAccount).filter(PecAccount.id == pec_id).first()
+    pec = pec_service.get_pec_by_id(db, pec_id)
     if not pec:
         raise HTTPException(status_code=404, detail="Connessione PEC non trovata")
 
-    try:
-        password = decrypt_password(pec.encrypted_password)
-        with smtplib.SMTP_SSL("smtps.pec.aruba.it", 465, timeout=10) as smtp:
-            smtp.login(pec.username, password)
-        log_audit(db, "pec_test_ok", user_id=admin.id, detail={"pec_id": pec.id, "email": pec.email})
+    success, error = pec_service.test_pec_smtp(pec)
+    if success:
+        log_audit(db, "pec_test_ok", user_id=admin.id,
+                  detail={"pec_id": pec.id, "email": pec.email})
         return {"success": True}
-    except smtplib.SMTPException as exc:
-        log_audit(
-            db, "pec_test_fail", user_id=admin.id,
-            detail={"pec_id": pec.id, "email": pec.email, "error": str(exc)},
-        )
-        return {"success": False, "error": str(exc)}
-    except Exception as exc:
-        logger.exception("Errore test PEC id=%d", pec_id)
-        return {"success": False, "error": str(exc)}
+
+    log_audit(db, "pec_test_fail", user_id=admin.id,
+              detail={"pec_id": pec.id, "email": pec.email, "error": error})
+    return {"success": False, "error": error}
 
 
 # --- Aggiornamenti ---
@@ -437,33 +399,16 @@ def apply_update(
 
 # --- Backup / Restore Database ---
 
-_DB_PATH = Path(str(engine.url).replace("sqlite:///", ""))
-
-
 @router.get("/db/backup")
 def backup_database(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> FileResponse:
     """Scarica un backup del database SQLite corrente."""
-    if not _DB_PATH.exists():
-        raise HTTPException(status_code=404, detail="File database non trovato")
-
-    settings.BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"mubi_backup_{ts}.db"
-    backup_path = settings.BACKUPS_DIR / filename
-
-    # Usa backup API di SQLite per un dump consistente
-    src_conn = sqlite3.connect(str(_DB_PATH))
-    dst_conn = sqlite3.connect(str(backup_path))
     try:
-        src_conn.backup(dst_conn)
-    finally:
-        dst_conn.close()
-        src_conn.close()
-
-    log_audit(db, "db_backup", user_id=admin.id, detail={"filename": filename})
+        backup_path, filename = backup_service.create_backup(db, created_by_id=admin.id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return FileResponse(
         path=str(backup_path),
@@ -485,47 +430,16 @@ async def restore_database(
     if not file.filename or not file.filename.endswith(".db"):
         raise HTTPException(status_code=400, detail="Il file deve avere estensione .db")
 
-    # Salva il file caricato in una posizione temporanea
-    settings.BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_path = settings.BACKUPS_DIR / "restore_upload.tmp"
     content = await file.read()
-    tmp_path.write_bytes(content)
-
-    # Valida che sia un database SQLite valido
     try:
-        conn = sqlite3.connect(str(tmp_path))
-        conn.execute("SELECT count(*) FROM sqlite_master")
-        conn.close()
-    except sqlite3.DatabaseError as exc:
-        tmp_path.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Il file caricato non e' un database SQLite valido: {exc}",
-        ) from exc
-
-    # Audit prima della sostituzione (usa la sessione corrente)
-    log_audit(
-        db, "db_restore",
-        user_id=admin.id,
-        detail={"uploaded_filename": file.filename},
-    )
-
-    # Backup automatico del DB corrente prima di sovrascrivere
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    auto_backup_name = f"mubi_pre_restore_{ts}.db"
-    auto_backup_path = settings.BACKUPS_DIR / auto_backup_name
-    if _DB_PATH.exists():
-        shutil.copy2(str(_DB_PATH), str(auto_backup_path))
-
-    # Chiudi tutte le sessioni e il motore SQLAlchemy
-    db.close()
-    engine.dispose()
-
-    # Sostituisci il database
-    shutil.move(str(tmp_path), str(_DB_PATH))
-
-    # Ricrea le connessioni SQLAlchemy
-    Base.metadata.create_all(bind=engine)
+        auto_backup_name = backup_service.restore_database(
+            db,
+            uploaded_filename=file.filename,
+            content=content,
+            restored_by_id=admin.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {
         "message": "Database ripristinato con successo",
@@ -538,37 +452,9 @@ def reinit_database(
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Elimina e ricrea tutte le tabelle del database (reset completo).
-
-    Esegue un backup automatico prima di procedere e ricrea l'utente admin
-    di default (altrimenti il DB resterebbe senza utenti e nessuno potrebbe
-    più autenticarsi fino al prossimo restart del servizio).
-    """
-    settings.BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    auto_backup_name = f"mubi_pre_reinit_{ts}.db"
-    auto_backup_path = settings.BACKUPS_DIR / auto_backup_name
-    if _DB_PATH.exists():
-        shutil.copy2(str(_DB_PATH), str(auto_backup_path))
-
+    """Elimina e ricrea tutte le tabelle del database (reset completo)."""
     db.close()
-    engine.dispose()
-
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-
-    # Ricrea l'utente admin di default e registra il reinit nel nuovo audit log
-    new_db = SessionLocal()
-    try:
-        admin_service.ensure_admin_exists(new_db)
-        log_audit(
-            new_db, "db_reinit",
-            user_id=None,
-            detail={"auto_backup": auto_backup_name, "triggered_by": admin.username},
-        )
-    finally:
-        new_db.close()
-
+    auto_backup_name = backup_service.reinit_database(triggered_by_username=admin.username)
     return {
         "message": "Database reinizializzato con successo",
         "auto_backup": auto_backup_name,
@@ -578,10 +464,5 @@ def reinit_database(
 @router.get("/db/has-backups")
 def has_backups(admin: User = Depends(require_admin)) -> dict:
     """Controlla se esistono backup precedenti nella cartella data/backups/."""
-    if not settings.BACKUPS_DIR.exists():
-        return {"has_backups": False, "files": []}
-    files = sorted(
-        [f.name for f in settings.BACKUPS_DIR.glob("*.db")],
-        reverse=True,
-    )
-    return {"has_backups": len(files) > 0, "files": files[:10]}
+    files = backup_service.list_recent_backups(limit=10)
+    return {"has_backups": len(files) > 0, "files": files}

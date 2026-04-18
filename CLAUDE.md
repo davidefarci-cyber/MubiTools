@@ -180,6 +180,39 @@ business logic e delega a service specializzati per le capability trasversali
   (`data/remi_settings.json`) + salvataggio/lettura del template DOCX
   (`data/remi_template.docx`).
 
+## Modulo `admin`
+
+Il pannello admin segue lo stesso pattern `router → service` con split per
+dominio (utenti/audit, PEC, backup DB). Il router resta thin: auth, parsing,
+mapping `ValueError`→`HTTPException`, response shape.
+
+- **`router.py`** — solo orchestrazione: `Depends(require_admin)`, parsing
+  request, delega ai service, formattazione response (`_user_to_dict`,
+  `_pec_to_dict`).
+- **`service.py`** — User CRUD (`create_user`, `update_user`, `reset_password`,
+  `list_users`, getters), password hashing/verifica bcrypt
+  (`hash_password`/`verify_password`, usato anche da `app/auth/router.py`),
+  audit log (`get_audit_log` paginato, `delete_audit_log`),
+  `ensure_admin_exists` (chiamato da `app/main.py` in lifespan).
+- **`pec_service.py`** — CRUD account PEC + test SMTP
+  (`smtps.pec.aruba.it:465`). Gestisce dup-check email, encrypt/decrypt
+  password via `app/utils/encryption.py`, e protezione "ultima PEC attiva"
+  (errore di dominio sollevato come `ValueError`). `test_pec_smtp` è puro:
+  ritorna `(success, error_msg)` senza audit, è il router a loggare
+  `pec_test_ok`/`pec_test_fail`.
+- **`backup_service.py`** — backup/restore/reinit del DB SQLite via
+  `sqlite3.backup` API + `shutil`. Usa `settings.BACKUPS_DIR` come unica
+  sorgente di path. Restore e reinit incapsulano il lifecycle del motore
+  SQLAlchemy (`engine.dispose()` + `Base.metadata.create_all`); il reinit
+  apre una nuova `SessionLocal` per ricreare l'utente admin via
+  `service.ensure_admin_exists` (altrimenti il DB resterebbe inaccessibile).
+  Backup automatici `pre_restore_*.db` / `pre_reinit_*.db` salvati prima di
+  ogni operazione distruttiva.
+- **`update_service.py`** — **isolato e intoccato**. Gestisce esclusivamente
+  gli aggiornamenti GitHub: `git fetch/pull` via GitPython, `pip install -r
+  requirements.txt`, restart servizio (systemd/sc su Windows). Nessuna
+  interazione DB. Non rifattorizzare insieme a router/business logic.
+
 ## Note operative
 
 - `ADMIN_PASSWORD` è **required**: pydantic-settings fallisce l'avvio se manca.
