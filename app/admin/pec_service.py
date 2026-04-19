@@ -10,6 +10,7 @@ import smtplib
 from sqlalchemy.orm import Session
 
 from app.models import PecAccount, log_audit
+from app.shared.constants import SMTP_HOST, SMTP_PORT, SMTP_TEST_TIMEOUT
 from app.utils.encryption import decrypt_password, encrypt_password
 
 logger = logging.getLogger(__name__)
@@ -148,7 +149,7 @@ def test_pec_smtp(pec: PecAccount) -> tuple[bool, str | None]:
     """
     try:
         password = decrypt_password(pec.encrypted_password)
-        with smtplib.SMTP_SSL("smtps.pec.aruba.it", 465, timeout=10) as smtp:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TEST_TIMEOUT) as smtp:
             smtp.login(pec.username, password)
         return True, None
     except smtplib.SMTPException as exc:

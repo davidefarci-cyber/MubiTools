@@ -20,6 +20,10 @@ app/
 ├── logging_config.py    # setup_logging(): rotating file + console
 ├── auth/                # JWT, dipendenze FastAPI (get_current_user, require_admin, require_module), rate limit
 ├── admin/               # Pannello admin: utenti, update via GitPython, backup/restore DB, audit
+├── shared/              # Utility condivise tra moduli
+│   ├── excel_mapper.py  # find_column(df, candidates, *, mode)
+│   ├── regex.py         # EMAIL_REGEX, is_valid_email
+│   └── constants.py     # SMTP_HOST/PORT/SEND_TIMEOUT/TEST_TIMEOUT
 ├── utils/               # Helper condivisi (encryption.py per Fernet)
 ├── modules/             # Un package per modulo di business
 │   ├── caricamento_remi/
@@ -47,6 +51,10 @@ Moduli con sottosistemi multipli (es. `invio_remi`) possono avere più
 file service affiancati (`email_service.py`, `pdf_service.py`,
 `settings_service.py`): stesso principio, split per responsabilità.
 
+Ogni `app/modules/<nome>/__init__.py` re-esporta il router:
+`from .router import router; __all__ = ["router"]`.
+`app/main.py` importa con `from app.modules.<nome> import router as ...`.
+
 ## Shared / infrastruttura
 
 - **Config** → `app/config.py`. Accesso: `from app.config import settings`
@@ -64,6 +72,23 @@ file service affiancati (`email_service.py`, `pdf_service.py`,
 - **Modelli** → un solo file `app/models.py`. `log_audit(db, action, user_id, detail)` per tracciare azioni.
 - **Logging** → `logger = logging.getLogger(__name__)` in ogni modulo.
   Non usare `print`. Exception non gestite sono loggate con traceback dall'handler globale in `app/main.py`.
+
+## app/shared/ — utility condivise
+
+Package di utility senza dipendenze da FastAPI/DB, importabile da qualsiasi modulo.
+
+- **`excel_mapper.py`** — `find_column(df, candidates, *, mode="exact")`:
+  trova il nome colonna reale nel DataFrame tra i candidati.
+  - `mode="exact"` (default): match esatto case-insensitive dopo strip.
+  - `mode="substring"`: il candidato è contenuto nel nome colonna (case-insensitive).
+  I `COL_*_VARIANTS` restano nei moduli che li definiscono (dati business specifici);
+  vengono passati come `candidates` a `find_column`.
+- **`regex.py`** — `EMAIL_REGEX` e `is_valid_email(address)`: unica sorgente
+  di verità per il formato email/PEC. Importare da qui, non ridefinire localmente.
+- **`constants.py`** — costanti globali non business-specific:
+  `SMTP_HOST`, `SMTP_PORT`, `SMTP_SEND_TIMEOUT` (invio PEC),
+  `SMTP_TEST_TIMEOUT` (test login admin).
+  Aggiungere qui nuovi magic value ricorrenti tra ≥ 2 moduli.
 
 ## Esecuzione in dev
 
@@ -141,7 +166,8 @@ load. Le env vars vanno settate nel top di `conftest.py`, prima di ogni
    - `MODULE_NAME = "<nome>"`
    - endpoint con `current_user: User = Depends(require_module(MODULE_NAME))`
      quando l'accesso va filtrato per modulo abilitato.
-3. In `app/main.py` importare il router e chiamare
+3. In `app/main.py` importare il router con
+   `from app.modules.<nome> import router as <nome>_router` e montarlo con
    `app.include_router(<nome>_router, prefix="/api/<nome-kebab>", tags=["<nome>"])`.
 4. Se il modulo ha una UI, aggiungere la pagina in `app/static/` e il link nel menu SPA.
 5. Se introduce nuovi modelli DB, definirli in `app/models.py` (non creare
@@ -161,7 +187,7 @@ business logic e delega a service specializzati per le capability trasversali
   `StreamingResponse` per l'SSE di `/send-all`, delega a `service`.
 - **`service.py`** — CRUD anagrafica DL (con validazione P.IVA tramite
   `caricamento_remi.service.validate_partita_iva` + formato PEC tramite
-  `email_service.is_valid_email`), sync pratiche pending ↔ anagrafica,
+  `app.shared.regex.is_valid_email`), sync pratiche pending ↔ anagrafica,
   aggregazione pending per distributore, orchestrazione `stream_send_all`
   (async generator che yielda eventi SSE: `generating_pdf`, `sending`,
   `sent`/`error`, `complete`). Gli errori di dominio sono segnalati con
@@ -172,10 +198,9 @@ business logic e delega a service specializzati per le capability trasversali
   `<REMI>` come tabella), converte in PDF via `soffice --headless` e
   restituisce bytes. Usa `python-docx` + OPC XML per la tabella REMI.
   Richiede LibreOffice/Writer installato (`soffice` nel PATH).
-- **`email_service.py`** — `send_pec(...)` su `smtps.pec.aruba.it:465`
-  (SMTP_SSL + `smtplib`). Contiene anche `EMAIL_REGEX` e `is_valid_email()`:
-  unica sorgente di verità per il formato email/PEC nel modulo (la
-  centralizzazione in `app/shared/` è prevista in una sessione futura).
+- **`email_service.py`** — `send_pec(...)` su SMTP Aruba (parametri da
+  `app.shared.constants`). `EMAIL_REGEX` e `is_valid_email()` vivono in
+  `app/shared/regex.py` e sono importati da qui.
 - **`settings_service.py`** — persistenza JSON delle impostazioni
   (`data/remi_settings.json`) + salvataggio/lettura del template DOCX
   (`data/remi_template.docx`).
@@ -194,8 +219,8 @@ mapping `ValueError`→`HTTPException`, response shape.
   (`hash_password`/`verify_password`, usato anche da `app/auth/router.py`),
   audit log (`get_audit_log` paginato, `delete_audit_log`),
   `ensure_admin_exists` (chiamato da `app/main.py` in lifespan).
-- **`pec_service.py`** — CRUD account PEC + test SMTP
-  (`smtps.pec.aruba.it:465`). Gestisce dup-check email, encrypt/decrypt
+- **`pec_service.py`** — CRUD account PEC + test SMTP (parametri SMTP
+  da `app.shared.constants`). Gestisce dup-check email, encrypt/decrypt
   password via `app/utils/encryption.py`, e protezione "ultima PEC attiva"
   (errore di dominio sollevato come `ValueError`). `test_pec_smtp` è puro:
   ritorna `(success, error_msg)` senza audit, è il router a loggare
@@ -238,8 +263,7 @@ logica di dominio è nel service.
     validate da `_ALLOWED_TRANSITIONS`; solleva `ValueError` su stato
     destinazione non ammesso.
   - `validate_partita_iva(piva)` — checksum standard italiano, riusata
-    anche da `invio_remi.service` (unica sorgente di verità; la
-    centralizzazione in `app/shared/` è prevista in futuro).
+    anche da `invio_remi.service` (unica sorgente di verità).
 - **`schemas.py`** — modelli Pydantic per match/confirm/history/stats/
   resend/change-status.
 
@@ -265,8 +289,9 @@ per responsabilità; l'unico simbolo importato dal router è `elabora_incassi`.
 - **`excel_reader.py`** — lettura smart di file Excel (`_read_excel_smart`
   auto-rileva il foglio giusto provando tutti i fogli finché trova le
   colonne attese) + costanti `COL_*_VARIANTS` (varianti case-insensitive
-  del nome colonna). **Modificare qui per supportare un nuovo formato
-  Excel** (aggiungere varianti) o un nuovo file sorgente.
+  del nome colonna, passate a `app.shared.excel_mapper.find_column`).
+  **Modificare qui per supportare un nuovo formato Excel** (aggiungere
+  varianti) o un nuovo file sorgente.
 - **`validator.py`** — normalizzazione valori (`_normalize_amount`:
   gestisce `€`/virgole/separatori di migliaia; `_normalize_date`:
   `dayfirst=True`) e data-quality check `_validate_all_columns` sulle
@@ -274,9 +299,8 @@ per responsabilità; l'unico simbolo importato dal router è `elabora_incassi`.
   validazione o gestire un formato valore atipico**.
 - **`schemas.py`** — modelli Pydantic per upload/process/result.
 
-Il pattern column-mapping (`COL_*_VARIANTS` + `_find_column`) è duplicato
-in `connessione/service.py`; l'unificazione in un `app/shared/` è prevista
-in una sessione futura.
+Il column-mapping usa `find_column` da `app/shared/excel_mapper.py`;
+i `COL_*_VARIANTS` sono dati business del modulo, non spostati in shared.
 
 ## Note operative
 

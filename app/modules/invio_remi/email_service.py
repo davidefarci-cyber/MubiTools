@@ -1,7 +1,6 @@
 """Servizio di invio PEC con allegato PDF via SMTP Aruba + validazione email."""
 
 import logging
-import re
 import smtplib
 from email import encoders
 from email.mime.base import MIMEBase
@@ -11,24 +10,11 @@ from email.mime.text import MIMEText
 from sqlalchemy.orm import Session
 
 from app.models import PecAccount
+from app.shared.constants import SMTP_HOST, SMTP_PORT, SMTP_SEND_TIMEOUT
+from app.shared.regex import EMAIL_REGEX, is_valid_email
 from app.utils.encryption import decrypt_password
 
 logger = logging.getLogger(__name__)
-
-# Parametri SMTP Aruba fissi
-SMTP_HOST = "smtps.pec.aruba.it"
-SMTP_PORT = 465
-SMTP_TIMEOUT = 30
-
-# Regex formato email/PEC. La centralizzazione in app/shared/ arriverà in una
-# sessione successiva; per ora vive qui ed è l'unica sorgente di verità usata
-# dal modulo invio_remi.
-EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
-def is_valid_email(address: str) -> bool:
-    """Verifica che ``address`` rispetti il formato email/PEC accettato."""
-    return bool(EMAIL_REGEX.match(address or ""))
 
 
 async def send_pec(
@@ -85,7 +71,7 @@ async def send_pec(
     msg.attach(file_part)
 
     try:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as smtp:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_SEND_TIMEOUT) as smtp:
             smtp.login(pec.username, password)
             smtp.sendmail(pec.email, [to_address], msg.as_string())
         logger.info("PEC inviata: from=%s to=%s subject=%s", pec.email, to_address, subject)

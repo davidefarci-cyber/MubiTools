@@ -15,10 +15,10 @@ from app.database import Base, SessionLocal, engine
 from app.logging_config import setup_logging
 from app.auth.router import router as auth_router
 from app.admin.router import router as admin_router
-from app.modules.incassi_mubi.router import router as incassi_router
-from app.modules.connessione.router import router as connessione_router
-from app.modules.invio_remi.router import router as invio_remi_router
-from app.modules.caricamento_remi.router import router as caricamento_remi_router
+from app.modules.incassi_mubi import router as incassi_router
+from app.modules.connessione import router as connessione_router
+from app.modules.invio_remi import router as invio_remi_router
+from app.modules.caricamento_remi import router as caricamento_remi_router
 from app.admin.service import ensure_admin_exists
 
 logger = logging.getLogger(__name__)
