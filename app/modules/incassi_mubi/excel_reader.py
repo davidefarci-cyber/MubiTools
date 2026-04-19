@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from app.shared.excel_mapper import find_column
+
 logger = logging.getLogger(__name__)
 
 # Nomi colonna normalizzati (case-insensitive matching)
@@ -37,15 +39,6 @@ COL_DATA_SCADENZA_VARIANTS = [
 ]
 
 
-def _find_column(df: pd.DataFrame, variants: list[str]) -> str | None:
-    """Trova il nome colonna reale nel DataFrame tra le varianti."""
-    lower_cols = {c.strip().lower(): c for c in df.columns}
-    for variant in variants:
-        if variant.lower() in lower_cols:
-            return lower_cols[variant.lower()]
-    return None
-
-
 def _read_excel_smart(
     file_path: Path,
     required_variants: list[list[str]],
@@ -70,7 +63,7 @@ def _read_excel_smart(
 
         found_count = 0
         for variants in required_variants:
-            if _find_column(df, variants):
+            if find_column(df, variants):
                 found_count += 1
 
         if found_count > best_found:
@@ -89,7 +82,7 @@ def _read_excel_smart(
 
     # Report colonne trovate/mancanti
     for variants in required_variants:
-        col = _find_column(best_df, variants) if best_df is not None else None
+        col = find_column(best_df, variants) if best_df is not None else None
         key = variants[0]
         if col:
             debug["columns_matched"][key] = col

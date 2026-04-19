@@ -24,9 +24,9 @@ from app.modules.incassi_mubi.excel_reader import (
     COL_MODALITA_PAGAMENTO_VARIANTS,
     COL_NR_BOLLETTA_VARIANTS,
     COL_NR_DOCUMENTO_VARIANTS,
-    _find_column,
     _read_excel_smart,
 )
+from app.shared.excel_mapper import find_column
 from app.modules.incassi_mubi.validator import _normalize_amount, _normalize_date
 
 logger = logging.getLogger(__name__)
@@ -64,13 +64,13 @@ def fase1_parse_incassi(file_path: Path) -> pd.DataFrame:
 
     # Normalizza importi nelle colonne rilevanti
     for variants in [COL_IMPORTO_APERTO_VARIANTS]:
-        col_name = _find_column(df, variants)
+        col_name = find_column(df, variants)
         if col_name:
             df[col_name] = df[col_name].apply(_normalize_amount)
 
     # Normalizza date
     for variants in [COL_DATA_PAGAMENTO_VARIANTS, COL_DATA_SCADENZA_VARIANTS]:
-        col_name = _find_column(df, variants)
+        col_name = find_column(df, variants)
         if col_name:
             df[col_name] = df[col_name].apply(_normalize_date)
 
@@ -102,9 +102,9 @@ def fase2_join_importo_aperto(
     )
 
     # Trova colonne chiave
-    col_boll_incassi = _find_column(df_incassi, COL_NR_BOLLETTA_VARIANTS)
-    col_boll_massivo = _find_column(df_massivo, COL_NR_BOLLETTA_VARIANTS)
-    col_importo_incassi = _find_column(df_incassi, COL_IMPORTO_APERTO_VARIANTS)
+    col_boll_incassi = find_column(df_incassi, COL_NR_BOLLETTA_VARIANTS)
+    col_boll_massivo = find_column(df_massivo, COL_NR_BOLLETTA_VARIANTS)
+    col_importo_incassi = find_column(df_incassi, COL_IMPORTO_APERTO_VARIANTS)
 
     if not col_boll_incassi:
         raise ValueError("Colonna 'numerofattura' non trovata nel file incassi")
@@ -165,8 +165,8 @@ def fase3_piani_rientro(
         label="piani_rientro",
     )
 
-    col_boll_conf = _find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
-    col_boll_piani = _find_column(df_piani, COL_NR_DOCUMENTO_VARIANTS)
+    col_boll_conf = find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
+    col_boll_piani = find_column(df_piani, COL_NR_DOCUMENTO_VARIANTS)
 
     if not col_boll_conf or not col_boll_piani:
         logger.warning("  Colonna numero fattura/documento non trovata, skip piani di rientro")
@@ -214,16 +214,16 @@ def fase4_popola_conferimento(
     """
     logger.info("FASE 4: Popola colonne Conferimento (INCASSATO, DATA PAGAMENTO, MODALITA')")
 
-    col_boll_conf = _find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
-    col_boll_inc = _find_column(df_incassi, COL_NR_BOLLETTA_VARIANTS)
+    col_boll_conf = find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
+    col_boll_inc = find_column(df_incassi, COL_NR_BOLLETTA_VARIANTS)
 
     if not col_boll_conf or not col_boll_inc:
         raise ValueError("Colonna numero fattura non trovata")
 
     # Prepara lookup da incassi
-    col_importo = _find_column(df_incassi, COL_IMPORTO_APERTO_VARIANTS)
-    col_data_pag = _find_column(df_incassi, COL_DATA_PAGAMENTO_VARIANTS)
-    col_mod_pag = _find_column(df_incassi, COL_MODALITA_PAGAMENTO_VARIANTS)
+    col_importo = find_column(df_incassi, COL_IMPORTO_APERTO_VARIANTS)
+    col_data_pag = find_column(df_incassi, COL_DATA_PAGAMENTO_VARIANTS)
+    col_mod_pag = find_column(df_incassi, COL_MODALITA_PAGAMENTO_VARIANTS)
 
     # Crea dizionario lookup dal file incassi
     lookup: dict[str, dict] = {}
@@ -240,9 +240,9 @@ def fase4_popola_conferimento(
             lookup[key] = entry
 
     # Trova colonne target nel conferimento per nome
-    col_z = _find_column(df_conferimento, ["incassato", "importo incassato"])
-    col_aa = _find_column(df_conferimento, COL_DATA_PAGAMENTO_VARIANTS)
-    col_ab = _find_column(df_conferimento, COL_MODALITA_PAGAMENTO_VARIANTS)
+    col_z = find_column(df_conferimento, ["incassato", "importo incassato"])
+    col_aa = find_column(df_conferimento, COL_DATA_PAGAMENTO_VARIANTS)
+    col_ab = find_column(df_conferimento, COL_MODALITA_PAGAMENTO_VARIANTS)
 
     # Se non trovate, crearle
     if not col_z:
@@ -283,9 +283,9 @@ def fase5_calcolo_incassato(df_conferimento: pd.DataFrame) -> pd.DataFrame:
     logger.info("FASE 5: Calcolo Incassato (ImportoAperto_conf - ImportoAperto_incassi)")
 
     # Colonna Q = "importo aperto" nel conferimento (importo aperto al tempo t-1)
-    col_q = _find_column(df_conferimento, COL_IMPORTO_APERTO_VARIANTS)
+    col_q = find_column(df_conferimento, COL_IMPORTO_APERTO_VARIANTS)
     # Colonna Z = "INCASSATO" (attualmente contiene l'importo aperto dal file incassi)
-    col_z = _find_column(df_conferimento, ["incassato", "importo incassato"])
+    col_z = find_column(df_conferimento, ["incassato", "importo incassato"])
 
     if not col_q or not col_z:
         logger.warning("  Colonne 'importo aperto' o 'INCASSATO' non trovate, skip fase 5")
@@ -317,10 +317,10 @@ def fase6_ordinamento_controllo(
     """
     logger.info("FASE 6: Ordinamento e controllo")
 
-    col_z = _find_column(df_conferimento, ["incassato", "importo incassato"])
-    col_aa = _find_column(df_conferimento, COL_DATA_PAGAMENTO_VARIANTS)
-    col_ab = _find_column(df_conferimento, COL_MODALITA_PAGAMENTO_VARIANTS)
-    col_boll = _find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
+    col_z = find_column(df_conferimento, ["incassato", "importo incassato"])
+    col_aa = find_column(df_conferimento, COL_DATA_PAGAMENTO_VARIANTS)
+    col_ab = find_column(df_conferimento, COL_MODALITA_PAGAMENTO_VARIANTS)
+    col_boll = find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
 
     # Converti colonna INCASSATO in numerico per ordinamento
     if col_z:

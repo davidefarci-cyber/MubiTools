@@ -22,9 +22,9 @@ from app.modules.incassi_mubi.excel_reader import (
     COL_MODALITA_PAGAMENTO_VARIANTS,
     COL_NR_BOLLETTA_VARIANTS,
     COL_DATA_PAGAMENTO_VARIANTS,
-    _find_column,
     _read_excel_smart,
 )
+from app.shared.excel_mapper import find_column
 from app.modules.incassi_mubi.processor import (
     fase1_parse_incassi,
     fase2_join_importo_aperto,
@@ -54,7 +54,7 @@ def salva_conferimento(
     """
     logger.info("Salvataggio conferimento aggiornato: %s", output_path)
 
-    col_boll = _find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
+    col_boll = find_column(df_conferimento, COL_NR_BOLLETTA_VARIANTS)
     anomaly_bollette = {a["numero_bolletta"] for a in anomalie}
 
     # Salva con openpyxl per poter applicare stili
@@ -143,7 +143,7 @@ def elabora_incassi(
         ("datapagamento", COL_DATA_PAGAMENTO_VARIANTS),
         ("metodopagamento", COL_MODALITA_PAGAMENTO_VARIANTS),
     ]:
-        col = _find_column(df_incassi, variants)
+        col = find_column(df_incassi, variants)
         if col:
             debug_incassi["columns_matched"][label] = col
         else:
@@ -218,7 +218,7 @@ def elabora_incassi(
     salva_nuove_righe(df_nuove_righe, output_nuove)
 
     # Calcola statistiche
-    col_z = _find_column(df_conferimento, ["incassato", "importo incassato"])
+    col_z = find_column(df_conferimento, ["incassato", "importo incassato"])
 
     fatture_incassate = 0
     if col_z:

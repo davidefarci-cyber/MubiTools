@@ -16,10 +16,12 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
 
+from app.shared.excel_mapper import find_column
+
 logger = logging.getLogger(__name__)
 
 # ===== Mappatura colonne FILE B -> FILE A =====
-COL_MAPPING = {
+COLUMN_MAP_B_TO_A = {
     "ATTIVITA'": "ATTIVITA'",
     "DATA RICEZIONE": "OGGI",
     "DATA EVASIONE": "",
@@ -126,19 +128,12 @@ def _clean_val(val: object) -> str:
     return val
 
 
-def _find_col(df: pd.DataFrame, search_name: str) -> str | None:
-    """Cerca una colonna nel dataframe con match case-insensitive parziale."""
-    for c in df.columns:
-        if search_name.lower() in c.lower():
-            return c
-    return None
-
 
 def _build_row(df_b: pd.DataFrame, row_idx: int, warnings: set[str]) -> dict:
     """Costruisce una riga FILE A dalla riga row_idx del FILE B."""
     new_row: dict[str, object] = {}
 
-    for col_a, source in COL_MAPPING.items():
+    for col_a, source in COLUMN_MAP_B_TO_A.items():
         if source == "OGGI":
             new_row[col_a] = datetime.now().strftime("%d/%m/%Y")
         elif source == "RICEZIONE ATTIVITA'":
@@ -148,7 +143,7 @@ def _build_row(df_b: pd.DataFrame, row_idx: int, warnings: set[str]) -> dict:
         else:
             # Indirizzi
             if col_a in _INDIRIZZO_MAP:
-                found_col = _find_col(df_b, _INDIRIZZO_MAP[col_a])
+                found_col = find_column(df_b, [_INDIRIZZO_MAP[col_a]], mode="substring")
                 if found_col:
                     val = _clean_val(df_b[found_col].iloc[row_idx])
                     val = val.upper() if val else ""
@@ -178,7 +173,7 @@ def _build_row(df_b: pd.DataFrame, row_idx: int, warnings: set[str]) -> dict:
 
             # Altri campi
             else:
-                found_col = source if source in df_b.columns else _find_col(df_b, source)
+                found_col = source if source in df_b.columns else find_column(df_b, [source], mode="substring")
                 if found_col:
                     val = _clean_val(df_b[found_col].iloc[row_idx])
                     if val:
@@ -202,7 +197,7 @@ def _build_row(df_b: pd.DataFrame, row_idx: int, warnings: set[str]) -> dict:
 def _get_columns_order() -> list[str]:
     """Restituisce l'ordine delle colonne con LUNG. dopo PDR."""
     columns: list[str] = []
-    for k in COL_MAPPING:
+    for k in COLUMN_MAP_B_TO_A:
         columns.append(k)
         if k == "PDR":
             columns.append("LUNG.")

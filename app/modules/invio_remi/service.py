@@ -25,7 +25,7 @@ from app.database import SessionLocal
 from app.models import DlRegistry, RemiPractice, log_audit
 from app.modules.caricamento_remi.service import validate_partita_iva
 from app.modules.invio_remi import email_service, settings_service
-from app.modules.invio_remi.email_service import is_valid_email
+from app.shared.regex import is_valid_email
 from app.modules.invio_remi.pdf_service import format_date_for_display, generate_pdf
 from app.modules.invio_remi.schemas import (
     DlRegistryBulkResponse,
