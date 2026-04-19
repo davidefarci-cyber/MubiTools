@@ -214,6 +214,9 @@ mapping `ValueError`→`HTTPException`, response shape.
 - **`router.py`** — solo orchestrazione: `Depends(require_admin)`, parsing
   request, delega ai service, formattazione response (`_user_to_dict`,
   `_pec_to_dict`).
+- **`schemas.py`** — modelli Pydantic di request/response (`UserOut`,
+  `CreateUserRequest`, `UpdateUserRequest`, `ResetPasswordRequest`,
+  `ApplyUpdateRequest`, `AuditLogOut`, `CreatePecRequest`, `UpdatePecRequest`).
 - **`service.py`** — User CRUD (`create_user`, `update_user`, `reset_password`,
   `list_users`, getters), password hashing/verifica bcrypt
   (`hash_password`/`verify_password`, usato anche da `app/auth/router.py`),
