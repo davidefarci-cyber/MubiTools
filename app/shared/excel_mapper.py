@@ -1,8 +1,8 @@
 """Utility condivisa per il mapping di colonne Excel.
 
-Centralizza i due pattern precedenti:
-- match esatto case-insensitive (ex _find_column di incassi_mubi)
-- match substring case-insensitive (ex _find_col di connessione)
+Centralizza i due pattern di ricerca colonne usati nei moduli:
+- match esatto case-insensitive (usato da incassi_mubi)
+- match substring case-insensitive (usato da connessione)
 """
 
 from typing import Literal
