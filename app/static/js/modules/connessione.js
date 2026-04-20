@@ -248,8 +248,8 @@ const Connessione = {
                 </div>
             </div>
 
-            <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;min-width:0;max-width:100%;">
-                <div style="overflow:auto;max-height:260px;">
+            <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;min-width:0;width:100%;">
+                <div style="overflow:auto;max-height:260px;width:100%;">
                     <table id="cr-table" style="border-collapse:collapse;font-size:0.78rem;white-space:nowrap;">
                         <thead>
                             <tr style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;">
