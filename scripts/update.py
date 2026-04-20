@@ -1,4 +1,4 @@
-"""Script di aggiornamento MUBI Tools da GitHub.
+"""Script di aggiornamento Grid da GitHub.
 
 Operazioni:
 1. Legge VERSION locale
@@ -227,7 +227,7 @@ if __name__ == "__main__":
             if line.startswith("GITHUB_REPO="):
                 github_repo = line.split("=", 1)[1].strip()
 
-    print(f"MUBI Tools — Aggiornamento")
+    print("Grid — Aggiornamento")
     print(f"Repository: {github_repo}")
     print(f"Versione locale: {get_local_version()}")
     print()

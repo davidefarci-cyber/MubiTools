@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 REM ============================================================
-REM MUBI Tools — Disinstallazione
+REM Grid — Disinstallazione
 REM Eseguire come Amministratore
 REM ============================================================
 
@@ -12,7 +12,7 @@ set "LOG_FILE=%~dp0uninstall.log"
 
 echo.
 echo ============================================================
-echo   MUBI Tools — Disinstallazione
+echo   Grid — Disinstallazione
 echo ============================================================
 echo.
 echo Log: %LOG_FILE%
@@ -49,6 +49,7 @@ echo [%date% %time%] STEP 2 OK - Servizio rimosso >> "%LOG_FILE%"
 REM Step 3: Rimuovi regola firewall
 echo [3/5] Rimozione regola firewall...
 netsh advfirewall firewall delete rule name="MUBI Tools Web App" >nul 2>&1
+netsh advfirewall firewall delete rule name="Grid Web App" >nul 2>&1
 echo   OK
 echo [%date% %time%] STEP 3 OK - Regola firewall rimossa >> "%LOG_FILE%"
 

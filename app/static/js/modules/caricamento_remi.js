@@ -1,5 +1,5 @@
 /**
- * MUBI Tools — Modulo Caricamento REMI
+ * Grid — Modulo Caricamento REMI
  * Tab: Caricamento REMI (match + conferma) e Dashboard (storico pratiche).
  * L'Anagrafica DL è gestita dal modulo Invio REMI (vedi anagrafica_dl.js).
  */

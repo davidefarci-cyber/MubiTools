@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="45 42 150 156" width="150" height="156">
+  <title>Grid</title>
+
+  <style>
+    .hex-inactive { fill: none; stroke: currentColor; stroke-width: 4; stroke-linejoin: round; opacity: 0.55; }
+    .hex-active   { fill: rgba(243, 156, 18, 0.18); stroke: #F39C12; stroke-width: 4; stroke-linejoin: round; }
+    .hex-core     { fill: #F39C12; stroke: #F39C12; stroke-width: 4; stroke-linejoin: round; }
+  </style>
+
+  <polygon class="hex-inactive" points="146,75 133,97.5 107,97.5 94,75 107,52.5 133,52.5" />
+  <polygon class="hex-inactive" points="185,97.5 172,120 146,120 133,97.5 146,75 172,75" />
+  <polygon class="hex-inactive" points="146,165 133,187.5 107,187.5 94,165 107,142.5 133,142.5" />
+  <polygon class="hex-inactive" points="107,142.5 94,165 68,165 55,142.5 68,120 94,120" />
+
+  <polygon class="hex-active" points="107,97.5 94,120 68,120 55,97.5 68,75 94,75" />
+  <polygon class="hex-core"   points="146,120 133,142.5 107,142.5 94,120 107,97.5 133,97.5" />
+  <polygon class="hex-active" points="185,142.5 172,165 146,165 133,142.5 146,120 172,120" />
+</svg>

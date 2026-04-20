@@ -1,5 +1,5 @@
 /**
- * MUBI Tools — Modulo condiviso Anagrafica DL
+ * Grid — Modulo condiviso Anagrafica DL
  * Gestione distributori locali in un modale "stand-alone" (consultazione + CRUD + caricamento massivo).
  * Esposto come `AnagraficaDL.openModal()` per essere richiamato da altri moduli.
  */

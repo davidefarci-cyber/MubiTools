@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 REM ============================================================
-REM MUBI Tools — Reinstallazione / Aggiornamento forzato
+REM Grid — Reinstallazione / Aggiornamento forzato
 REM Per uso dell'amministratore di sistema in caso di problemi.
 REM Eseguire come Amministratore
 REM ============================================================
@@ -13,7 +13,7 @@ set "LOG_FILE=%~dp0reinstall.log"
 
 echo.
 echo ============================================================
-echo   MUBI Tools — Reinstallazione
+echo   Grid — Reinstallazione
 echo ============================================================
 echo.
 echo Log: %LOG_FILE%

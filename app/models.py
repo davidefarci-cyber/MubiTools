@@ -1,4 +1,4 @@
-"""Modelli ORM per il database MUBI Tools."""
+"""Modelli ORM per il database Grid."""
 
 import json
 from datetime import datetime, timezone

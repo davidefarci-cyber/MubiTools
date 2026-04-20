@@ -1,5 +1,5 @@
 /**
- * MUBI Tools — Modulo Connessione
+ * Grid — Modulo Connessione
  * UI con sottosezioni per gestione attivita' connessione gas
  */
 

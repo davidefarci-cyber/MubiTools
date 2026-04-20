@@ -1,5 +1,5 @@
 /**
- * MUBI Tools — Pannello Admin
+ * Grid — Pannello Admin
  * Gestione utenti, aggiornamenti, audit log
  */
 

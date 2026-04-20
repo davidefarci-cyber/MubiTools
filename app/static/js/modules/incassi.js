@@ -1,5 +1,5 @@
 /**
- * MUBI Tools — Modulo Incassi Mubi
+ * Grid — Modulo Incassi Mubi
  * UI stepper per upload e elaborazione file Excel
  */
 

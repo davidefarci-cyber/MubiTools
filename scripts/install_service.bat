@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 REM ============================================================
-REM MUBI Tools — Registrazione servizio Windows con NSSM
+REM Grid — Registrazione servizio Windows con NSSM
 REM Questo script puo' essere eseguito separatamente per
 REM ri-registrare il servizio senza reinstallare tutto.
 REM Eseguire come Amministratore.
@@ -38,7 +38,7 @@ if exist "%INSTALL_DIR%\.env" (
 )
 
 echo.
-echo MUBI Tools — Registrazione servizio
+echo Grid — Registrazione servizio
 echo Porta: !APP_PORT!
 echo.
 
@@ -53,7 +53,7 @@ REM Registra
 echo Registrazione nuovo servizio...
 "%INSTALL_DIR%\install\nssm.exe" install %SERVICE_NAME% "%INSTALL_DIR%\venv\Scripts\python.exe" "-m uvicorn app.main:app --host 0.0.0.0 --port !APP_PORT!"
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% AppDirectory "%INSTALL_DIR%"
-"%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% Description "MUBI Tools - Gestione incassi"
+"%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% Description "Grid - Automazione backoffice utility elettrica/gas"
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% Start SERVICE_AUTO_START
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% AppStdout "%INSTALL_DIR%\logs\service.log"
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% AppStderr "%INSTALL_DIR%\logs\service.log"
