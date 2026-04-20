@@ -2,11 +2,11 @@
 setlocal EnableDelayedExpansion
 
 REM ============================================================
-REM MUBI Tools — Setup automatico per Windows Server
+REM Grid — Setup automatico per Windows Server
 REM Eseguire come Amministratore
 REM ============================================================
 
-set "APP_NAME=MUBI Tools"
+set "APP_NAME=Grid"
 set "INSTALL_DIR=C:\mubi-tools"
 set "GITHUB_REPO=davidefarci-cyber/MubiTools"
 set "GITHUB_URL=https://github.com/%GITHUB_REPO%.git"
@@ -292,7 +292,7 @@ REM Rimuovi servizio esistente
 REM Registra nuovo servizio
 "%INSTALL_DIR%\install\nssm.exe" install %SERVICE_NAME% "%INSTALL_DIR%\venv\Scripts\python.exe" "-m uvicorn app.main:app --host 0.0.0.0 --port !APP_PORT!"
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% AppDirectory "%INSTALL_DIR%"
-"%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% Description "MUBI Tools - Gestione incassi"
+"%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% Description "Grid - Automazione backoffice utility elettrica/gas"
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% Start SERVICE_AUTO_START
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% AppStdout "%INSTALL_DIR%\logs\service.log"
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% AppStderr "%INSTALL_DIR%\logs\service.log"
@@ -305,8 +305,10 @@ echo [%date% %time%] STEP 9 OK - Servizio registrato >> "%LOG_FILE%"
 REM ─── STEP 10: Regola firewall ───────────────────────────────
 echo.
 echo [STEP 10/13] Configurazione firewall...
+REM Rimuove regole vecchie e nuove (idempotente; gestisce rebrand da versioni precedenti)
 netsh advfirewall firewall delete rule name="MUBI Tools Web App" >nul 2>&1
-netsh advfirewall firewall add rule name="MUBI Tools Web App" dir=in action=allow protocol=TCP localport=!APP_PORT! >nul 2>&1
+netsh advfirewall firewall delete rule name="Grid Web App" >nul 2>&1
+netsh advfirewall firewall add rule name="Grid Web App" dir=in action=allow protocol=TCP localport=!APP_PORT! >nul 2>&1
 echo   OK - Porta !APP_PORT! aperta nel firewall
 echo [%date% %time%] STEP 10 OK - Firewall porta !APP_PORT! >> "%LOG_FILE%"
 

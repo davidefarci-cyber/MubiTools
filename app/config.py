@@ -1,4 +1,4 @@
-"""Configurazione centrale dell'applicazione MUBI Tools."""
+"""Configurazione centrale dell'applicazione Grid."""
 
 import secrets
 from pathlib import Path

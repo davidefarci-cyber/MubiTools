@@ -1,4 +1,4 @@
-/* MUBI Tools — Dark Theme */
+/* Grid — Dark Theme */
 
 :root {
     --bg-primary:   #0D1117;
@@ -66,17 +66,31 @@ a:hover {
     padding: 20px;
     border-bottom: 1px solid var(--border);
     text-align: center;
-}
-
-.sidebar-logo h1 {
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: var(--accent);
+    color: var(--text-primary);
 }
 
 .sidebar-logo span {
+    display: block;
+    margin-top: 6px;
     font-size: 0.75rem;
     color: var(--text-muted);
+}
+
+.brand-logo {
+    display: inline-block;
+    max-width: 100%;
+    height: auto;
+    color: var(--text-primary);
+}
+
+.brand-logo--sidebar {
+    width: 160px;
+}
+
+.brand-logo--login {
+    width: 220px;
+    display: block;
+    margin: 0 auto 8px;
 }
 
 .sidebar-nav {

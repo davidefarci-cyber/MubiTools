@@ -1,4 +1,4 @@
-"""MUBI Tools — FastAPI entrypoint."""
+"""Grid — FastAPI entrypoint."""
 
 import logging
 import time
@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Crea le tabelle del database e le cartelle necessarie all'avvio."""
     # Setup logging
     setup_logging()
-    logger.info("MUBI Tools v%s — avvio in corso", settings.version)
+    logger.info("Grid v%s — avvio in corso", settings.version)
 
     # Crea cartelle se non esistono
     settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -60,12 +60,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info("Servizio pronto su porta %d", settings.PORT)
     yield
-    logger.info("MUBI Tools — shutdown")
+    logger.info("Grid — shutdown")
 
 
 app = FastAPI(
-    title="MUBI Tools",
-    description="Gestione automatizzata procedure operative su file Excel da Microsoft Dynamics",
+    title="Grid",
+    description="Automazione backoffice per utility elettrica e gas — elaborazione Excel Dynamics, pratiche REMI, PEC.",
     version=settings.version,
     lifespan=lifespan,
 )

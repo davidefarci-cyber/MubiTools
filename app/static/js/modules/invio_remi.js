@@ -1,5 +1,5 @@
 /**
- * MUBI Tools — Modulo Invio REMI
+ * Grid — Modulo Invio REMI
  * Tabella pratiche pending, impostazioni, invio massivo PEC con SSE
  */
 

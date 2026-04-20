@@ -12,7 +12,7 @@ def setup_logging() -> None:
     """Configura il logging con output su file rotante e console."""
     log_dir: Path = settings.LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "mubi-tools.log"
+    log_file = log_dir / "grid.log"
 
     # Formatter
     fmt = logging.Formatter(

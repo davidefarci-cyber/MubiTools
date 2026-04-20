@@ -1,5 +1,5 @@
 /**
- * MUBI Tools — Modulo autenticazione
+ * Grid — Modulo autenticazione
  * Gestione login, logout, token storage
  */
 

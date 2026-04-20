@@ -1,4 +1,4 @@
-# CLAUDE.md — MUBI Tools
+# CLAUDE.md — Grid
 
 Guida sintetica per navigare il repo e aggiungere codice coerente con le
 convenzioni esistenti. Per dettagli di business consultare i singoli moduli.
@@ -312,6 +312,6 @@ i `COL_*_VARIANTS` sono dati business del modulo, non spostati in shared.
   chiave auto-generata in `data/secret.key`).
 - Path sempre via `settings` o `BASE_DIR` — mai ricalcolare `Path(__file__)`.
 - Aggiornamenti: `app/admin/update_service.py` usa GitPython sul working tree
-  locale (`BASE_DIR`). Non installare MubiTools come package.
+  locale (`BASE_DIR`). Non installare Grid come package Python.
 - `tools/legacy/` contiene utility standalone non integrate (es. Tkinter GUI
   Windows). Ignorare in dev normale.

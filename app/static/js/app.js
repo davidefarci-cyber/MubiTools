@@ -1,5 +1,5 @@
 /**
- * MUBI Tools — App principale
+ * Grid — App principale
  * Router SPA, auth guard, navigazione
  */
 
