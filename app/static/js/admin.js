@@ -1,10 +1,11 @@
 /**
- * MUBI Tools — Pannello Admin
+ * Grid — Pannello Admin
  * Gestione utenti, aggiornamenti, audit log
  */
 
 const Admin = {
     users: [],
+    pecAccounts: [],
     auditPage: 1,
 
     render(container) {
@@ -16,6 +17,25 @@ const Admin = {
                 </div>
                 <div id="admin-users-list">
                     <div class="spinner" style="margin:20px auto;"></div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    <span>Connessioni PEC</span>
+                    <button class="btn btn-primary btn-sm" id="btn-add-pec">+ Nuova PEC</button>
+                </div>
+                <div id="admin-pec-list">
+                    <div class="spinner" style="margin:20px auto;"></div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title">Gestione Database</div>
+                <div id="admin-db-management">
+                    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+                        <button class="btn btn-primary btn-sm" id="btn-db-backup">Scarica Backup</button>
+                        <button class="btn btn-sm btn-warn" id="btn-db-restore">Ripristina Backup</button>
+                        <button class="btn btn-sm btn-danger" id="btn-db-reinit">Reinizializza DB</button>
+                    </div>
                 </div>
             </div>
             <div class="card">
@@ -31,21 +51,23 @@ const Admin = {
                 </div>
             </div>
             <div class="card">
-                <div class="card-title">Aggiornamenti</div>
-                <div id="admin-updates">
-                    <div class="spinner" style="margin:20px auto;"></div>
+                <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+                    <span>Audit Log</span>
+                    <button class="btn btn-sm btn-warn" id="btn-audit-clear">Pulisci log</button>
                 </div>
-            </div>
-            <div class="card">
-                <div class="card-title">Audit Log</div>
                 <div id="admin-audit-log">
                     <div class="spinner" style="margin:20px auto;"></div>
                 </div>
             </div>
         `;
         document.getElementById('btn-add-user').addEventListener('click', () => this.showCreateUserModal());
+        document.getElementById('btn-add-pec').addEventListener('click', () => this.showCreatePecModal());
+        document.getElementById('btn-db-backup').addEventListener('click', () => this.downloadBackup());
+        document.getElementById('btn-db-restore').addEventListener('click', () => this.showRestoreModal());
+        document.getElementById('btn-db-reinit').addEventListener('click', () => this.confirmReinitDb());
+        document.getElementById('btn-audit-clear').addEventListener('click', () => this.confirmClearAuditLog());
         this.loadUsers();
-        this.loadUpdateInfo();
+        this.loadPecAccounts();
         this.loadSystemInfo();
         this.loadUpdates();
         this.loadAuditLog();
@@ -118,13 +140,15 @@ const Admin = {
     },
 
     bindUserActions() {
-        document.querySelectorAll('.btn-edit').forEach(btn => {
+        const usersContainer = document.getElementById('admin-users-list');
+        if (!usersContainer) return;
+        usersContainer.querySelectorAll('.btn-edit').forEach(btn => {
             btn.addEventListener('click', () => {
                 const user = this.users.find(u => u.id === parseInt(btn.dataset.id));
                 if (user) this.showEditUserModal(user);
             });
         });
-        document.querySelectorAll('.btn-toggle').forEach(btn => {
+        usersContainer.querySelectorAll('.btn-toggle').forEach(btn => {
             btn.addEventListener('click', () => {
                 const user = this.users.find(u => u.id === parseInt(btn.dataset.id));
                 if (user) this.confirmToggleUser(user);
@@ -157,6 +181,15 @@ const Admin = {
                 <div class="form-group">
                     <label><input type="checkbox" id="new-mod-incassi" checked style="width:auto;margin-right:8px;">Incassi Mubi</label>
                 </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="new-mod-connessione" checked style="width:auto;margin-right:8px;">Connessione</label>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="new-mod-caricamento-remi" style="width:auto;margin-right:8px;">Caricamento REMI</label>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="new-mod-invio-remi" style="width:auto;margin-right:8px;">Invio REMI</label>
+                </div>
             </form>`;
 
         showModal('Nuovo Utente', body, [
@@ -172,6 +205,9 @@ const Admin = {
         const role = document.getElementById('new-role').value;
         const modules = [];
         if (document.getElementById('new-mod-incassi').checked) modules.push('incassi_mubi');
+        if (document.getElementById('new-mod-connessione').checked) modules.push('connessione');
+        if (document.getElementById('new-mod-caricamento-remi').checked) modules.push('caricamento_remi');
+        if (document.getElementById('new-mod-invio-remi').checked) modules.push('invio_remi');
 
         if (!username || !fullName || password.length < 8) {
             showToast('Compilare tutti i campi (password min. 8 caratteri)', 'error');
@@ -220,6 +256,15 @@ const Admin = {
                 <div class="form-group">
                     <label><input type="checkbox" id="edit-mod-incassi" ${modules.includes('incassi_mubi') ? 'checked' : ''} style="width:auto;margin-right:8px;">Incassi Mubi</label>
                 </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="edit-mod-connessione" ${modules.includes('connessione') ? 'checked' : ''} style="width:auto;margin-right:8px;">Connessione</label>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="edit-mod-caricamento-remi" ${modules.includes('caricamento_remi') ? 'checked' : ''} style="width:auto;margin-right:8px;">Caricamento REMI</label>
+                </div>
+                <div class="form-group">
+                    <label><input type="checkbox" id="edit-mod-invio-remi" ${modules.includes('invio_remi') ? 'checked' : ''} style="width:auto;margin-right:8px;">Invio REMI</label>
+                </div>
                 <hr style="border-color:var(--border);margin:16px 0;">
                 <div class="form-group">
                     <label>Nuova Password (lasciare vuoto per non cambiare)</label>
@@ -239,6 +284,9 @@ const Admin = {
         const password = document.getElementById('edit-password').value;
         const modules = [];
         if (document.getElementById('edit-mod-incassi').checked) modules.push('incassi_mubi');
+        if (document.getElementById('edit-mod-connessione').checked) modules.push('connessione');
+        if (document.getElementById('edit-mod-caricamento-remi').checked) modules.push('caricamento_remi');
+        if (document.getElementById('edit-mod-invio-remi').checked) modules.push('invio_remi');
 
         try {
             const res = await Auth.apiRequest(`/admin/users/${userId}`, {
@@ -305,133 +353,263 @@ const Admin = {
         }
     },
 
-    // --- Updates ---
+    // --- PEC Accounts ---
 
-    async loadUpdateInfo() {
-        const container = document.getElementById('admin-updates');
+    async loadPecAccounts() {
+        const container = document.getElementById('admin-pec-list');
         try {
-            const res = await Auth.apiRequest('/admin/update/check');
-            if (!res.ok) throw new Error('Errore controllo aggiornamenti');
-            const data = await res.json();
-
-            const hasUpdate = data.update_available;
-            const errorMsg = data.error ? `<p style="color:var(--accent-amber);font-size:0.85rem;margin-top:8px;">Errore controllo: ${App.escapeHtml(data.error)}</p>` : '';
-
-            container.innerHTML = `
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px;">
-                    <div class="stat-card">
-                        <div class="stat-label">Versione locale</div>
-                        <div class="stat-value">${data.local_version || '-'}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Versione remota</div>
-                        <div class="stat-value" style="color:${hasUpdate ? 'var(--accent-green)' : 'var(--text-primary)'}">
-                            ${data.remote_version || 'N/D'}
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Stato</div>
-                        <div class="stat-value" style="color:${hasUpdate ? 'var(--accent-amber)' : 'var(--accent-green)'}">
-                            ${hasUpdate ? 'Aggiornamento disponibile' : 'Aggiornato'}
-                        </div>
-                    </div>
-                </div>
-                ${errorMsg}
-                <div style="display:flex;gap:12px;margin-top:8px;">
-                    <button class="btn btn-sm btn-edit" id="btn-check-updates">Controlla Aggiornamenti</button>
-                    ${hasUpdate ? '<button class="btn btn-sm btn-primary" id="btn-do-update">Aggiorna Ora</button>' : ''}
-                </div>
-                <div id="update-log" style="margin-top:16px;display:none;"></div>
-            `;
-
-            document.getElementById('btn-check-updates').addEventListener('click', () => this.loadUpdateInfo());
-            const btnUpdate = document.getElementById('btn-do-update');
-            if (btnUpdate) {
-                btnUpdate.addEventListener('click', () => this.confirmUpdate());
-            }
+            const res = await Auth.apiRequest('/admin/pec');
+            if (!res.ok) throw new Error('Errore caricamento PEC');
+            this.pecAccounts = await res.json();
+            container.innerHTML = this.renderPecTable(this.pecAccounts);
+            this.bindPecActions();
         } catch (err) {
-            container.innerHTML = `<p style="color:var(--accent-red)">${App.escapeHtml(err.message)}</p>
-                <button class="btn btn-sm btn-edit" onclick="Admin.loadUpdateInfo()">Riprova</button>`;
+            container.innerHTML = `<p style="color:var(--accent-red)">${App.escapeHtml(err.message)}</p>`;
         }
     },
 
-    confirmUpdate() {
-        showModal(
-            'Conferma Aggiornamento',
-            '<p>Vuoi aggiornare MUBI Tools all\'ultima versione?</p><p style="color:var(--text-muted);font-size:0.85rem;margin-top:8px;">Il sistema eseguira\' git pull, aggiornerà le dipendenze e riavviera\' il servizio.</p>',
-            [
-                { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
-                { label: 'Aggiorna Ora', class: 'btn-primary', onClick: () => { closeModal(); this.performUpdate(); } },
-            ]
-        );
+    renderPecTable(accounts) {
+        if (!accounts.length) return '<p style="color:var(--text-muted)">Nessuna connessione PEC configurata.</p>';
+
+        const rows = accounts.map(p => {
+            const statusBadge = p.is_active
+                ? '<span class="badge badge-active">Attiva</span>'
+                : '<span class="badge badge-disabled">Disattiva</span>';
+
+            return `
+                <tr>
+                    <td><strong>${App.escapeHtml(p.label)}</strong></td>
+                    <td>${App.escapeHtml(p.email)}</td>
+                    <td>${statusBadge}</td>
+                    <td>
+                        <span id="pec-test-result-${p.id}" style="font-size:0.85rem;"></span>
+                    </td>
+                    <td>
+                        <div style="display:flex;gap:6px;">
+                            <button class="btn btn-sm btn-pec-test" data-id="${p.id}" title="Testa Connessione">Testa</button>
+                            <button class="btn btn-sm btn-pec-edit" data-id="${p.id}" title="Modifica">Modifica</button>
+                            <button class="btn btn-sm btn-warn btn-pec-delete" data-id="${p.id}" title="Elimina">Elimina</button>
+                        </div>
+                    </td>
+                </tr>`;
+        }).join('');
+
+        return `
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Etichetta</th>
+                            <th>Email</th>
+                            <th>Stato</th>
+                            <th>Test</th>
+                            <th>Azioni</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
     },
 
-    async performUpdate() {
-        const logDiv = document.getElementById('update-log');
-        if (logDiv) {
-            logDiv.style.display = 'block';
-            logDiv.innerHTML = '<div class="spinner" style="margin:10px auto;"></div><p style="color:var(--text-muted);text-align:center;">Aggiornamento in corso...</p>';
+    bindPecActions() {
+        document.querySelectorAll('.btn-pec-test').forEach(btn => {
+            btn.addEventListener('click', () => this.testPec(parseInt(btn.dataset.id)));
+        });
+        document.querySelectorAll('.btn-pec-edit').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const pec = this.pecAccounts.find(p => p.id === parseInt(btn.dataset.id));
+                if (pec) this.showEditPecModal(pec);
+            });
+        });
+        document.querySelectorAll('.btn-pec-delete').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const pec = this.pecAccounts.find(p => p.id === parseInt(btn.dataset.id));
+                if (pec) this.confirmDeletePec(pec);
+            });
+        });
+    },
+
+    showCreatePecModal() {
+        const body = `
+            <form id="create-pec-form">
+                <div class="form-group">
+                    <label>Etichetta</label>
+                    <input type="text" id="pec-label" required placeholder="Es: PEC Principale">
+                </div>
+                <div class="form-group">
+                    <label>Email PEC</label>
+                    <input type="email" id="pec-email" required placeholder="esempio@pec.it">
+                </div>
+                <div class="form-group">
+                    <label>Username SMTP</label>
+                    <input type="text" id="pec-username" required placeholder="username@pec.it">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="pec-password" required autocomplete="new-password">
+                </div>
+                <div style="background:var(--bg-tertiary);border-radius:var(--radius);padding:12px;margin-top:12px;">
+                    <p style="color:var(--text-muted);font-size:0.85rem;margin:0;">
+                        <strong>Parametri SMTP (fissi):</strong> smtps.pec.aruba.it : 465 (SSL)
+                    </p>
+                </div>
+            </form>`;
+
+        showModal('Nuova Connessione PEC', body, [
+            { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+            { label: 'Crea PEC', class: 'btn-primary', onClick: () => this.createPec() },
+        ]);
+    },
+
+    async createPec() {
+        const label = document.getElementById('pec-label').value.trim();
+        const email = document.getElementById('pec-email').value.trim();
+        const username = document.getElementById('pec-username').value.trim();
+        const password = document.getElementById('pec-password').value;
+
+        if (!label || !email || !username || !password) {
+            showToast('Compilare tutti i campi', 'error');
+            return;
         }
 
         try {
-            const res = await Auth.apiRequest('/admin/update', { method: 'POST' });
+            const res = await Auth.apiRequest('/admin/pec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ label, email, username, password })
+            });
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.detail || 'Errore avvio aggiornamento');
+                throw new Error(err.detail || 'Errore creazione PEC');
             }
-
-            // Poll per risultato
-            this._pollUpdateStatus(logDiv);
+            closeModal();
+            showToast('Connessione PEC creata con successo', 'success');
+            this.loadPecAccounts();
         } catch (err) {
-            if (logDiv) logDiv.innerHTML = `<p style="color:var(--accent-red)">Errore: ${App.escapeHtml(err.message)}</p>`;
             showToast(err.message, 'error');
         }
     },
 
-    async _pollUpdateStatus(logDiv) {
-        const poll = async () => {
-            try {
-                const res = await Auth.apiRequest('/admin/update/status');
-                if (!res.ok) return;
-                const data = await res.json();
+    showEditPecModal(pec) {
+        const body = `
+            <form id="edit-pec-form">
+                <div class="form-group">
+                    <label>Etichetta</label>
+                    <input type="text" id="edit-pec-label" value="${App.escapeHtml(pec.label)}" required>
+                </div>
+                <div class="form-group">
+                    <label>Email PEC</label>
+                    <input type="email" id="edit-pec-email" value="${App.escapeHtml(pec.email)}" required>
+                </div>
+                <div class="form-group">
+                    <label>Username SMTP</label>
+                    <input type="text" id="edit-pec-username" value="${App.escapeHtml(pec.username)}" required>
+                </div>
+                <div class="form-group">
+                    <label>Password (lasciare vuoto per non cambiare)</label>
+                    <input type="password" id="edit-pec-password" autocomplete="new-password" placeholder="Lasciare vuoto = non cambiare">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="edit-pec-active" ${pec.is_active ? 'checked' : ''} style="width:auto;margin-right:8px;">
+                        Attiva
+                    </label>
+                </div>
+                <div style="background:var(--bg-tertiary);border-radius:var(--radius);padding:12px;margin-top:12px;">
+                    <p style="color:var(--text-muted);font-size:0.85rem;margin:0;">
+                        <strong>Parametri SMTP (fissi):</strong> smtps.pec.aruba.it : 465 (SSL)
+                    </p>
+                </div>
+            </form>`;
 
-                if (data.running) {
-                    setTimeout(poll, 2000);
-                    return;
-                }
+        showModal(`Modifica PEC: ${pec.label}`, body, [
+            { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+            { label: 'Salva', class: 'btn-primary', onClick: () => this.savePec(pec.id) },
+        ]);
+    },
 
-                if (data.result) {
-                    const r = data.result;
-                    const logHtml = (r.log || []).map(entry => {
-                        const icon = entry.success ? 'var(--accent-green)' : 'var(--accent-red)';
-                        return `<div style="padding:4px 0;font-size:0.85rem;">
-                            <span style="color:${icon};font-weight:600;">${entry.success ? 'OK' : 'ERR'}</span>
-                            <span style="color:var(--text-muted);margin:0 8px;">${App.escapeHtml(entry.step)}</span>
-                            <span>${App.escapeHtml((entry.output || '').substring(0, 200))}</span>
-                        </div>`;
-                    }).join('');
+    async savePec(pecId) {
+        const label = document.getElementById('edit-pec-label').value.trim();
+        const email = document.getElementById('edit-pec-email').value.trim();
+        const username = document.getElementById('edit-pec-username').value.trim();
+        const password = document.getElementById('edit-pec-password').value;
+        const isActive = document.getElementById('edit-pec-active').checked;
 
-                    if (logDiv) {
-                        logDiv.innerHTML = `
-                            <div style="background:var(--bg-tertiary);border-radius:var(--radius);padding:12px;margin-top:8px;">
-                                <strong style="color:${r.success ? 'var(--accent-green)' : 'var(--accent-red)'}">
-                                    ${r.success ? 'Aggiornamento completato' : 'Aggiornamento fallito'}
-                                </strong>
-                                ${r.new_version ? `<span style="color:var(--text-muted);margin-left:12px;">v${r.new_version}</span>` : ''}
-                                <div style="margin-top:8px;">${logHtml}</div>
-                            </div>`;
-                    }
+        if (!label || !email || !username) {
+            showToast('Compilare etichetta, email e username', 'error');
+            return;
+        }
 
-                    showToast(
-                        r.success ? 'Aggiornamento completato' : 'Aggiornamento fallito',
-                        r.success ? 'success' : 'error'
-                    );
-                }
-            } catch {
-                if (logDiv) logDiv.innerHTML = '<p style="color:var(--accent-red)">Errore nel polling stato aggiornamento</p>';
+        const payload = { label, email, username, is_active: isActive };
+        if (password) payload.password = password;
+
+        try {
+            const res = await Auth.apiRequest(`/admin/pec/${pecId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore aggiornamento PEC');
             }
-        };
-        setTimeout(poll, 2000);
+            closeModal();
+            showToast('Connessione PEC aggiornata', 'success');
+            this.loadPecAccounts();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    },
+
+    confirmDeletePec(pec) {
+        showModal(
+            'Conferma eliminazione',
+            `<p>Vuoi eliminare la connessione PEC <strong>${App.escapeHtml(pec.label)}</strong> (${App.escapeHtml(pec.email)})?</p>`,
+            [
+                { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+                { label: 'Elimina', class: 'btn-danger', onClick: () => this.deletePec(pec.id) },
+            ]
+        );
+    },
+
+    async deletePec(pecId) {
+        try {
+            const res = await Auth.apiRequest(`/admin/pec/${pecId}`, { method: 'DELETE' });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore eliminazione PEC');
+            }
+            closeModal();
+            showToast('Connessione PEC eliminata', 'success');
+            this.loadPecAccounts();
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    },
+
+    async testPec(pecId) {
+        const resultSpan = document.getElementById(`pec-test-result-${pecId}`);
+        if (resultSpan) {
+            resultSpan.innerHTML = '<span style="color:var(--text-muted)">Test in corso...</span>';
+        }
+
+        try {
+            const res = await Auth.apiRequest(`/admin/pec/${pecId}/test`, { method: 'POST' });
+            if (!res.ok) throw new Error('Errore durante il test');
+            const data = await res.json();
+
+            if (resultSpan) {
+                if (data.success) {
+                    resultSpan.innerHTML = '<span style="color:var(--accent-green);font-weight:600;">&#10003; Connesso</span>';
+                } else {
+                    resultSpan.innerHTML = `<span style="color:var(--accent-red);font-weight:600;">&#10007; ${App.escapeHtml(data.error || 'Errore')}</span>`;
+                }
+            }
+        } catch (err) {
+            if (resultSpan) {
+                resultSpan.innerHTML = `<span style="color:var(--accent-red);">&#10007; ${App.escapeHtml(err.message)}</span>`;
+            }
+        }
     },
 
     // --- System info ---
@@ -555,7 +733,7 @@ const Admin = {
         showModal(
             'Conferma aggiornamento',
             `<p>Vuoi aggiornare al branch <strong>${App.escapeHtml(branch)}</strong>?</p>
-             <p style="color:var(--text-muted);font-size:0.85rem;">L'applicazione potrebbe richiedere un riavvio dopo l'aggiornamento.</p>`,
+             <p style="color:var(--text-muted);font-size:0.85rem;">Verranno eseguiti: <strong>git pull</strong>, <strong>pip install</strong> e <strong>riavvio del servizio</strong>.<br>La pagina si ricaricherà automaticamente al termine.</p>`,
             [
                 { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
                 {
@@ -576,12 +754,36 @@ const Admin = {
                                 throw new Error(err.detail || 'Errore aggiornamento');
                             }
                             const data = await res.json();
-                            const msg = data.restart_required
-                                ? `Aggiornamento completato (${data.old_sha} → ${data.new_sha}). Riavvio consigliato.`
-                                : `Aggiornamento completato. Nessuna modifica rilevata.`;
-                            showToast(msg, 'success');
-                            this.loadUpdates();
-                            this.loadSystemInfo();
+
+                            const logHtml = (data.log || []).map(entry => {
+                                const color = entry.success ? 'var(--accent-green)' : 'var(--accent-red)';
+                                return `<div style="padding:4px 0;font-size:0.85rem;font-family:monospace;">
+                                    <span style="color:${color};font-weight:600;">${entry.success ? 'OK' : 'ERR'}</span>
+                                    <span style="color:var(--text-muted);margin:0 8px;">${App.escapeHtml(entry.step)}</span>
+                                    <span style="color:var(--text-primary);">${App.escapeHtml((entry.output || '').substring(0, 200))}</span>
+                                </div>`;
+                            }).join('');
+
+                            let countdown = 15;
+                            const countdownId = setInterval(() => {
+                                countdown--;
+                                const el = document.getElementById('update-countdown');
+                                if (el) el.textContent = countdown;
+                                if (countdown <= 0) {
+                                    clearInterval(countdownId);
+                                    window.location.reload();
+                                }
+                            }, 1000);
+
+                            result.innerHTML = `
+                                <div style="background:var(--bg-tertiary);border-radius:var(--radius);padding:12px;margin-top:8px;">
+                                    <strong style="color:var(--accent-green);">Aggiornamento completato</strong>
+                                    <span style="color:var(--text-muted);margin-left:12px;">${App.escapeHtml(data.old_sha)} → ${App.escapeHtml(data.new_sha)}</span>
+                                    <div style="margin-top:8px;">${logHtml}</div>
+                                    <p style="margin-top:12px;color:var(--text-muted);font-size:0.85rem;">
+                                        Il servizio si sta riavviando. La pagina si ricarica tra <strong id="update-countdown">${countdown}</strong> secondi...
+                                    </p>
+                                </div>`;
                         } catch (err) {
                             showToast(err.message, 'error');
                             result.innerHTML = `<p style="color:var(--accent-red)">${App.escapeHtml(err.message)}</p>`;
@@ -646,5 +848,187 @@ const Admin = {
         } catch (err) {
             container.innerHTML = `<p style="color:var(--accent-red)">${App.escapeHtml(err.message)}</p>`;
         }
-    }
+    },
+
+    confirmClearAuditLog() {
+        showModal(
+            'Pulisci audit log',
+            `<p>Cancellare <strong>tutte</strong> le voci dell'audit log?</p>
+             <p style="color:var(--text-muted);font-size:0.85rem;">L'operazione è irreversibile. Verrà registrata una nuova voce 'audit_log_cleared' con l'utente che ha eseguito la pulizia.</p>`,
+            [
+                { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+                {
+                    label: 'Pulisci',
+                    class: 'btn-danger',
+                    onClick: async () => {
+                        closeModal();
+                        try {
+                            const res = await Auth.apiRequest('/admin/audit-log', { method: 'DELETE' });
+                            if (!res.ok) {
+                                const err = await res.json();
+                                throw new Error(err.detail || 'Errore durante la pulizia del log');
+                            }
+                            const data = await res.json();
+                            showToast(`${data.deleted} voci cancellate`, 'success');
+                            this.loadAuditLog(1);
+                        } catch (err) {
+                            showToast(err.message, 'error');
+                        }
+                    },
+                },
+            ]
+        );
+    },
+
+    // --- Database Backup / Restore ---
+
+    async downloadBackup() {
+        try {
+            const res = await Auth.apiRequest('/admin/db/backup');
+            if (!res.ok) throw new Error('Errore durante il backup');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const disposition = res.headers.get('content-disposition') || '';
+            const match = disposition.match(/filename="?([^"]+)"?/);
+            a.download = match ? match[1] : 'mubi_backup.db';
+            a.href = url;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            showToast('Backup scaricato con successo', 'success');
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    },
+
+    showRestoreModal() {
+        const body = `
+            <p style="color:var(--accent-amber);margin-bottom:16px;font-weight:600;">
+                Questa operazione sovrascrive il database corrente. Assicurati di avere un backup recente.
+            </p>
+            <div id="restore-drop-zone" style="border:2px dashed var(--border);border-radius:var(--radius);padding:40px 20px;text-align:center;cursor:pointer;transition:border-color 0.2s,background 0.2s;">
+                <p style="color:var(--text-muted);margin-bottom:8px;">Trascina qui il file .db oppure clicca per selezionarlo</p>
+                <input type="file" id="restore-file-input" accept=".db" style="display:none;">
+                <p id="restore-file-name" style="color:var(--text-primary);font-weight:600;margin-top:8px;display:none;"></p>
+            </div>
+            <div id="restore-progress" style="display:none;margin-top:16px;text-align:center;">
+                <div class="spinner" style="margin:10px auto;"></div>
+                <p style="color:var(--text-muted);">Ripristino in corso...</p>
+            </div>`;
+
+        showModal('Ripristina Database', body, [
+            { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+            { label: 'Ripristina', class: 'btn-danger', onClick: () => this.executeRestore() },
+        ]);
+
+        const dropZone = document.getElementById('restore-drop-zone');
+        const fileInput = document.getElementById('restore-file-input');
+        const fileName = document.getElementById('restore-file-name');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = 'var(--accent)';
+            dropZone.style.background = 'var(--bg-tertiary)';
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.style.borderColor = 'var(--border)';
+            dropZone.style.background = 'transparent';
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = 'var(--border)';
+            dropZone.style.background = 'transparent';
+            if (e.dataTransfer.files.length > 0) {
+                fileInput.files = e.dataTransfer.files;
+                fileName.textContent = e.dataTransfer.files[0].name;
+                fileName.style.display = 'block';
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                fileName.textContent = fileInput.files[0].name;
+                fileName.style.display = 'block';
+            }
+        });
+    },
+
+    async executeRestore() {
+        const fileInput = document.getElementById('restore-file-input');
+        if (!fileInput || !fileInput.files.length) {
+            showToast('Seleziona un file .db da ripristinare', 'error');
+            return;
+        }
+
+        const file = fileInput.files[0];
+        if (!file.name.endsWith('.db')) {
+            showToast('Il file deve avere estensione .db', 'error');
+            return;
+        }
+
+        const progress = document.getElementById('restore-progress');
+        if (progress) progress.style.display = 'block';
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            const res = await Auth.apiRequest('/admin/db/restore', {
+                method: 'POST',
+                body: formData,
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore durante il ripristino');
+            }
+            const data = await res.json();
+            closeModal();
+            showToast(`Database ripristinato. Backup automatico: ${data.auto_backup}`, 'success');
+            // Ricarica la pagina per riflettere il nuovo DB
+            setTimeout(() => window.location.reload(), 1500);
+        } catch (err) {
+            if (progress) progress.style.display = 'none';
+            showToast(err.message, 'error');
+        }
+    },
+
+    confirmReinitDb() {
+        showModal(
+            'Reinizializza Database',
+            `<p style="color:var(--accent-red);font-weight:600;margin-bottom:12px;">
+                Attenzione: questa operazione elimina tutti i dati presenti nel database.
+             </p>
+             <p style="color:var(--text-muted);font-size:0.9rem;">
+                Verrà eseguito un backup automatico prima di procedere.<br>
+                Utenti, PEC, pratiche e tutti i record verranno cancellati definitivamente.
+             </p>`,
+            [
+                { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+                {
+                    label: 'Reinizializza',
+                    class: 'btn-danger',
+                    onClick: async () => {
+                        closeModal();
+                        try {
+                            const res = await Auth.apiRequest('/admin/db/reinit', { method: 'POST' });
+                            if (!res.ok) {
+                                const err = await res.json();
+                                throw new Error(err.detail || 'Errore durante la reinizializzazione');
+                            }
+                            const data = await res.json();
+                            showToast(`Database reinizializzato. Backup: ${data.auto_backup}`, 'success');
+                            setTimeout(() => window.location.reload(), 1500);
+                        } catch (err) {
+                            showToast(err.message, 'error');
+                        }
+                    },
+                },
+            ]
+        );
+    },
 };

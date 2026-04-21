@@ -1,76 +1,31 @@
-"""Router pannello admin: gestione utenti, aggiornamenti, audit log."""
+"""Router pannello admin: orchestrazione thin (auth + parsing + delega)."""
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from app.admin import backup_service, pec_service
 from app.admin import service as admin_service
 from app.admin import update_service
+from app.admin.schemas import (
+    ApplyUpdateRequest,
+    AuditLogOut,
+    CreatePecRequest,
+    CreateUserRequest,
+    ResetPasswordRequest,
+    UpdatePecRequest,
+    UpdateUserRequest,
+    UserOut,
+)
 from app.auth.dependencies import require_admin
 from app.database import get_db
-from app.models import User, log_audit
+from app.models import PecAccount, User, log_audit
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# --- Schemas ---
-
-class UserOut(BaseModel):
-    """Schema utente in output."""
-
-    id: int
-    username: str
-    full_name: str
-    role: str
-    is_active: bool
-    allowed_modules: list[str]
-    last_login: str | None
-    created_at: str | None
-
-
-class CreateUserRequest(BaseModel):
-    """Schema creazione utente."""
-
-    username: str = Field(min_length=3, max_length=50)
-    full_name: str = Field(min_length=1, max_length=100)
-    password: str = Field(min_length=8)
-    role: str = Field(default="user", pattern="^(admin|user)$")
-    allowed_modules: list[str] = Field(default=["incassi_mubi"])
-
-
-class UpdateUserRequest(BaseModel):
-    """Schema modifica utente."""
-
-    full_name: str | None = None
-    role: str | None = Field(default=None, pattern="^(admin|user)$")
-    allowed_modules: list[str] | None = None
-    is_active: bool | None = None
-
-
-class ResetPasswordRequest(BaseModel):
-    """Schema reset password."""
-
-    new_password: str = Field(min_length=8)
-
-
-class ApplyUpdateRequest(BaseModel):
-    """Schema richiesta aggiornamento."""
-
-    branch: str = Field(default="main", min_length=1)
-
-
-class AuditLogOut(BaseModel):
-    """Schema voce audit log."""
-
-    id: int
-    user_id: int | None
-    action: str
-    detail: str | None
-    timestamp: str | None
 
 
 # --- Helpers ---
@@ -89,7 +44,19 @@ def _user_to_dict(u: User) -> dict:
     }
 
 
-# --- Endpoints ---
+def _pec_to_dict(pec: PecAccount) -> dict:
+    """Converte un PecAccount ORM in dict per la risposta (senza password)."""
+    return {
+        "id": pec.id,
+        "label": pec.label,
+        "email": pec.email,
+        "username": pec.username,
+        "is_active": pec.is_active,
+        "created_at": pec.created_at.isoformat() if pec.created_at else None,
+    }
+
+
+# --- Users ---
 
 @router.get("/users")
 def list_users(
@@ -108,8 +75,7 @@ def create_user(
     db: Session = Depends(get_db),
 ) -> dict:
     """Crea un nuovo utente (solo admin)."""
-    existing = admin_service.get_user_by_username(db, request.username)
-    if existing:
+    if admin_service.get_user_by_username(db, request.username):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Username '{request.username}' gia' in uso",
@@ -168,6 +134,8 @@ def reset_password(
     )
 
 
+# --- Audit log ---
+
 @router.get("/audit-log")
 def get_audit_log(
     page: int = 1,
@@ -195,6 +163,114 @@ def get_audit_log(
             for log in logs
         ],
     }
+
+
+@router.delete("/audit-log")
+def clear_audit_log(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Cancella tutte le voci dell'audit log e registra l'operazione."""
+    deleted = admin_service.delete_audit_log(db, deleted_by_id=admin.id)
+    return {"deleted": deleted}
+
+
+# --- PEC Accounts ---
+
+@router.get("/pec")
+def list_pec(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Lista tutte le connessioni PEC configurate (password esclusa)."""
+    return [_pec_to_dict(p) for p in pec_service.list_pec_accounts(db)]
+
+
+@router.post("/pec", status_code=status.HTTP_201_CREATED)
+def create_pec(
+    request: CreatePecRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Crea una nuova connessione PEC."""
+    try:
+        pec = pec_service.create_pec(
+            db,
+            label=request.label,
+            email=request.email,
+            username=request.username,
+            password=request.password,
+            created_by_id=admin.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _pec_to_dict(pec)
+
+
+@router.put("/pec/{pec_id}")
+def update_pec(
+    pec_id: int,
+    request: UpdatePecRequest,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Modifica una connessione PEC. Se password e' vuota/null, non viene aggiornata."""
+    pec = pec_service.get_pec_by_id(db, pec_id)
+    if not pec:
+        raise HTTPException(status_code=404, detail="Connessione PEC non trovata")
+    try:
+        pec = pec_service.update_pec(
+            db,
+            pec=pec,
+            label=request.label,
+            email=request.email,
+            username=request.username,
+            password=request.password,
+            is_active=request.is_active,
+            updated_by_id=admin.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _pec_to_dict(pec)
+
+
+@router.delete("/pec/{pec_id}")
+def delete_pec(
+    pec_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Elimina una connessione PEC (non se e' l'unica attiva)."""
+    pec = pec_service.get_pec_by_id(db, pec_id)
+    if not pec:
+        raise HTTPException(status_code=404, detail="Connessione PEC non trovata")
+    try:
+        pec_service.delete_pec(db, pec=pec, deleted_by_id=admin.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"message": "Connessione PEC eliminata"}
+
+
+@router.post("/pec/{pec_id}/test")
+def test_pec(
+    pec_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Testa la connessione SMTP di un account PEC (login senza invio mail)."""
+    pec = pec_service.get_pec_by_id(db, pec_id)
+    if not pec:
+        raise HTTPException(status_code=404, detail="Connessione PEC non trovata")
+
+    success, error = pec_service.test_pec_smtp(pec)
+    if success:
+        log_audit(db, "pec_test_ok", user_id=admin.id,
+                  detail={"pec_id": pec.id, "email": pec.email})
+        return {"success": True}
+
+    log_audit(db, "pec_test_fail", user_id=admin.id,
+              detail={"pec_id": pec.id, "email": pec.email, "error": error})
+    return {"success": False, "error": error}
 
 
 # --- Aggiornamenti ---
@@ -253,3 +329,74 @@ def apply_update(
     except Exception as exc:
         logger.exception("Errore applicazione aggiornamento")
         raise HTTPException(status_code=500, detail=f"Errore git: {exc}") from exc
+
+
+# --- Backup / Restore Database ---
+
+@router.get("/db/backup")
+def backup_database(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Scarica un backup del database SQLite corrente."""
+    try:
+        backup_path, filename = backup_service.create_backup(db, created_by_id=admin.id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return FileResponse(
+        path=str(backup_path),
+        filename=filename,
+        media_type="application/x-sqlite3",
+    )
+
+
+@router.post("/db/restore", status_code=status.HTTP_200_OK)
+async def restore_database(
+    file: UploadFile,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Ripristina il database da un file .db caricato.
+
+    Prima di sovrascrivere, salva un backup automatico del DB corrente.
+    """
+    if not file.filename or not file.filename.endswith(".db"):
+        raise HTTPException(status_code=400, detail="Il file deve avere estensione .db")
+
+    content = await file.read()
+    try:
+        auto_backup_name = backup_service.restore_database(
+            db,
+            uploaded_filename=file.filename,
+            content=content,
+            restored_by_id=admin.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "message": "Database ripristinato con successo",
+        "auto_backup": auto_backup_name,
+    }
+
+
+@router.post("/db/reinit")
+def reinit_database(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Elimina e ricrea tutte le tabelle del database (reset completo)."""
+    db.close()
+    auto_backup_name = backup_service.reinit_database(triggered_by_username=admin.username)
+    return {
+        "message": "Database reinizializzato con successo",
+        "auto_backup": auto_backup_name,
+    }
+
+
+@router.get("/db/has-backups")
+def has_backups(admin: User = Depends(require_admin)) -> dict:
+    """Controlla se esistono backup precedenti nella cartella data/backups/."""
+    files = backup_service.list_recent_backups(limit=10)
+    return {"has_backups": len(files) > 0, "files": files}

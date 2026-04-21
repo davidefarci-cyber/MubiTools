@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 240" width="420" height="240">
+  <title>Grid — logo</title>
+  <desc>Honeycomb di 7 celle esagonali con percorso energizzato diagonale NW→C→SE.</desc>
+
+  <style>
+    .hex-inactive { fill: none; stroke: #1e293b; stroke-width: 3.5; stroke-linejoin: round; }
+    .hex-active   { fill: #fef3c7; stroke: #f59e0b; stroke-width: 3.5; stroke-linejoin: round; }
+    .hex-core     { fill: #f59e0b; stroke: #f59e0b; stroke-width: 3.5; stroke-linejoin: round; }
+    .wordmark     { fill: #1e293b; font-family: -apple-system, "Segoe UI", Inter, system-ui, sans-serif; font-weight: 700; font-size: 72px; letter-spacing: -0.03em; }
+  </style>
+
+  <!-- Mark: honeycomb 7 celle centrato a (120, 120), hex flat-top r=26 -->
+
+  <!-- Celle inattive: N, NE, S, SW -->
+  <polygon class="hex-inactive" points="146,75 133,97.5 107,97.5 94,75 107,52.5 133,52.5" />
+  <polygon class="hex-inactive" points="185,97.5 172,120 146,120 133,97.5 146,75 172,75" />
+  <polygon class="hex-inactive" points="146,165 133,187.5 107,187.5 94,165 107,142.5 133,142.5" />
+  <polygon class="hex-inactive" points="107,142.5 94,165 68,165 55,142.5 68,120 94,120" />
+
+  <!-- Percorso energizzato: NW -> C -> SE -->
+  <polygon class="hex-active" points="107,97.5 94,120 68,120 55,97.5 68,75 94,75" />
+  <polygon class="hex-core"   points="146,120 133,142.5 107,142.5 94,120 107,97.5 133,97.5" />
+  <polygon class="hex-active" points="185,142.5 172,165 146,165 133,142.5 146,120 172,120" />
+
+  <!-- Wordmark -->
+  <text x="235" y="145" class="wordmark">Grid</text>
+</svg>

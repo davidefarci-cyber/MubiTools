@@ -241,7 +241,8 @@ def reset_practices_to_pending(
 ) -> list[int]:
     """Reimposta a `pending` le pratiche in `error` fra gli id indicati.
 
-    Azzera `error_detail`, `send_batch_id`, `sent_at`. Esegue `db.commit()`.\n    Restituisce la lista degli id effettivamente aggiornati (per audit).
+    Azzera `error_detail`, `send_batch_id`, `sent_at`. Esegue `db.commit()`.
+    Restituisce la lista degli id effettivamente aggiornati (per audit).
     """
     practices = (
         db.query(RemiPractice)

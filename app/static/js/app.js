@@ -1,5 +1,5 @@
 /**
- * MUBI Tools — App principale
+ * Grid — App principale
  * Router SPA, auth guard, navigazione
  */
 
@@ -11,7 +11,22 @@ const App = {
         if (Auth.isLoggedIn()) {
             this.showApp();
         } else {
+            // Controlla primo avvio prima di mostrare il login
+            await this.checkFirstBoot();
             this.showLogin();
+        }
+    },
+
+    firstBootData: null,
+
+    async checkFirstBoot() {
+        try {
+            const res = await fetch('/auth/first-boot');
+            if (res.ok) {
+                this.firstBootData = await res.json();
+            }
+        } catch {
+            // Ignora errori, procedi normalmente
         }
     },
 
@@ -21,13 +36,144 @@ const App = {
         this.bindLoginForm();
     },
 
-    showApp() {
+    async showApp() {
         document.getElementById('login-page').style.display = 'none';
         document.getElementById('app-layout').style.display = 'flex';
         this.setupSidebar();
         this.setupLogout();
         this.loadVersion();
-        this.navigate('dashboard');
+
+        // Controlla se e' il primo avvio (password admin di default)
+        if (Auth.isAdmin()) {
+            try {
+                const res = await Auth.apiRequest('/auth/first-boot');
+                if (res && res.ok) {
+                    this.firstBootData = await res.json();
+                }
+            } catch { /* ignore */ }
+        }
+
+        if (this.firstBootData && this.firstBootData.is_first_boot && Auth.isAdmin()) {
+            this.showFirstBootWizard();
+        } else {
+            this.navigate('dashboard');
+        }
+    },
+
+    showFirstBootWizard() {
+        const content = document.getElementById('main-content');
+        const breadcrumb = document.getElementById('breadcrumb');
+        breadcrumb.textContent = 'Primo Avvio';
+
+        let restoreSection = '';
+        if (this.firstBootData && this.firstBootData.has_backups) {
+            restoreSection = `
+                <div class="card" style="margin-top:20px;border:1px solid var(--accent-amber);">
+                    <div class="card-title" style="color:var(--accent-amber);">Ripristina da backup precedente</div>
+                    <p style="color:var(--text-muted);margin-bottom:16px;">
+                        Sono stati trovati backup precedenti nella cartella di sistema.
+                        Puoi ripristinare un backup per recuperare dati da un'installazione precedente.
+                    </p>
+                    <button class="btn btn-sm btn-warn" id="btn-wizard-restore">Vai a Ripristina Backup</button>
+                </div>`;
+        }
+
+        content.innerHTML = `
+            <div class="card" style="max-width:700px;margin:40px auto;">
+                <div style="text-align:center;margin-bottom:24px;">
+                    <h2 style="color:var(--text-primary);margin-bottom:8px;">Installazione completata</h2>
+                    <p style="color:var(--accent-amber);font-weight:600;font-size:1.05rem;">
+                        Stai usando le credenziali di default: cambia la password admin prima di procedere.
+                    </p>
+                </div>
+                <div style="background:var(--bg-tertiary);border-radius:var(--radius);padding:20px;margin-bottom:20px;">
+                    <p style="color:var(--text-muted);margin-bottom:12px;">Per la sicurezza del sistema, cambia subito la password dell'account amministratore.</p>
+                    <button class="btn btn-primary" id="btn-wizard-change-pw">Cambia Password Admin</button>
+                </div>
+                <div style="text-align:center;">
+                    <button class="btn btn-sm" id="btn-wizard-skip" style="background:var(--bg-tertiary);color:var(--text-muted);">Continua senza cambiare (sconsigliato)</button>
+                </div>
+                ${restoreSection}
+            </div>`;
+
+        document.getElementById('btn-wizard-change-pw').addEventListener('click', () => {
+            this.showChangePasswordModal();
+        });
+        document.getElementById('btn-wizard-skip').addEventListener('click', () => {
+            this.firstBootData = null;
+            this.navigate('dashboard');
+        });
+        const restoreBtn = document.getElementById('btn-wizard-restore');
+        if (restoreBtn) {
+            restoreBtn.addEventListener('click', () => {
+                this.firstBootData = null;
+                this.navigate('admin');
+                // Apri la modale di restore dopo un breve delay per dare tempo al render
+                setTimeout(() => Admin.showRestoreModal(), 500);
+            });
+        }
+    },
+
+    showChangePasswordModal() {
+        const user = Auth.getUser();
+        const body = `
+            <form id="wizard-pw-form">
+                <div class="form-group">
+                    <label>Nuova Password (min. 8 caratteri)</label>
+                    <input type="password" id="wizard-new-pw" required minlength="8" autocomplete="new-password" placeholder="Inserisci la nuova password">
+                </div>
+                <div class="form-group">
+                    <label>Conferma Password</label>
+                    <input type="password" id="wizard-confirm-pw" required minlength="8" autocomplete="new-password" placeholder="Ripeti la nuova password">
+                </div>
+            </form>`;
+
+        showModal('Cambia Password Admin', body, [
+            { label: 'Annulla', class: 'btn-cancel', onClick: () => closeModal() },
+            { label: 'Salva Password', class: 'btn-primary', onClick: () => this.executePasswordChange() },
+        ]);
+    },
+
+    async executePasswordChange() {
+        const newPw = document.getElementById('wizard-new-pw').value;
+        const confirmPw = document.getElementById('wizard-confirm-pw').value;
+
+        if (newPw.length < 8) {
+            showToast('La password deve avere almeno 8 caratteri', 'error');
+            return;
+        }
+        if (newPw !== confirmPw) {
+            showToast('Le password non coincidono', 'error');
+            return;
+        }
+
+        try {
+            // Trova l'ID dell'admin corrente
+            const usersRes = await Auth.apiRequest('/admin/users');
+            if (!usersRes.ok) throw new Error('Errore caricamento utenti');
+            const users = await usersRes.json();
+            const currentUser = Auth.getUser();
+            const admin = users.find(u => u.username === currentUser.username);
+            if (!admin) throw new Error('Utente admin non trovato');
+
+            const res = await Auth.apiRequest(`/admin/users/${admin.id}/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_password: newPw }),
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore cambio password');
+            }
+
+            closeModal();
+            showToast('Password cambiata con successo! Effettua nuovamente il login.', 'success');
+            this.firstBootData = null;
+            // Forza re-login con la nuova password
+            setTimeout(() => Auth.logout(), 2000);
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
     },
 
     bindLoginForm() {
@@ -71,6 +217,9 @@ const App = {
         const items = [
             { view: 'dashboard', label: 'Dashboard', icon: 'home', always: true },
             { view: 'incassi', label: 'Incassi Mubi', icon: 'file', module: 'incassi_mubi' },
+            { view: 'connessione', label: 'Connessione', icon: 'link', module: 'connessione' },
+            { view: 'caricamento_remi', label: 'Caricamento REMI', icon: 'upload', module: 'caricamento_remi' },
+            { view: 'invio_remi', label: 'Invio REMI', icon: 'send', module: 'invio_remi' },
             { view: 'admin', label: 'Admin Panel', icon: 'settings', adminOnly: true },
         ];
 
@@ -99,6 +248,9 @@ const App = {
         const icons = {
             home: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
             file: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+            link: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+            upload: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+            send: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
             settings: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
         };
         return icons[name] || '';
@@ -136,6 +288,18 @@ const App = {
             case 'incassi':
                 breadcrumb.textContent = 'Incassi Mubi';
                 Incassi.render(content);
+                break;
+            case 'connessione':
+                breadcrumb.textContent = 'Connessione';
+                Connessione.render(content);
+                break;
+            case 'caricamento_remi':
+                breadcrumb.textContent = 'Caricamento REMI';
+                CaricamentoRemi.render(content);
+                break;
+            case 'invio_remi':
+                breadcrumb.textContent = 'Invio REMI';
+                InvioRemi.render(content);
                 break;
             case 'admin':
                 breadcrumb.textContent = 'Admin Panel';
@@ -197,7 +361,7 @@ const App = {
 };
 
 // Toast utility
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', duration = 3500) {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
@@ -208,7 +372,7 @@ function showToast(message, type = 'info') {
         toast.style.transform = 'translateY(20px)';
         toast.style.transition = '0.3s ease';
         setTimeout(() => toast.remove(), 300);
-    }, 3500);
+    }, duration);
 }
 
 // Modal utility

@@ -1,15 +1,20 @@
 """Servizio aggiornamento: gestione branch, check e apply updates via GitPython."""
 
 import logging
+import subprocess
+import sys
+import threading
 from pathlib import Path
 
 import git
 
-from app.config import settings
+from app.config import BASE_DIR, settings
 
 logger = logging.getLogger(__name__)
 
-REPO_PATH = Path(__file__).resolve().parent.parent.parent
+REPO_PATH = BASE_DIR
+SERVICE_NAME = "mubi-tools"
+REQUIREMENTS = REPO_PATH / "requirements.txt"
 
 
 def _get_repo() -> git.Repo:
@@ -85,14 +90,78 @@ def check_for_updates(branch: str = "main") -> dict:
     }
 
 
-def apply_update(branch: str = "main") -> dict:
-    """Fetch, checkout del branch target e pull.
+def _run_command(cmd: list[str], cwd: Path | None = None) -> tuple[int, str]:
+    """Esegue un sottoprocesso e ritorna (returncode, output)."""
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=cwd or REPO_PATH,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        output = (result.stdout + result.stderr).strip()
+        return result.returncode, output
+    except subprocess.TimeoutExpired:
+        return -1, "Timeout (180s)"
+    except Exception as exc:
+        return -1, str(exc)
 
-    Ritorna dettagli dell'operazione eseguita.
+
+def _restart_service_async(delay: float = 4.0) -> None:
+    """Avvia il riavvio del servizio in background, indipendente dal processo corrente.
+
+    Su Windows: spawn di un processo cmd.exe **detached** e staccato dal job
+    object di NSSM. Necessario perché 'net stop mubi-tools' fa terminare
+    il processo Python corrente (incluso un eventuale thread) — solo un
+    processo davvero staccato può eseguire 'net start' a valle.
+    Su Linux: systemctl gestisce il restart via D-Bus, un thread basta.
+    """
+    if sys.platform == "win32":
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+        delay_s = max(1, int(delay))
+        # '&' (non '&&') => net start viene eseguito anche se net stop ritorna errore
+        # (es. servizio già fermo o timeout sul canale SCM).
+        cmd_line = (
+            f"timeout /t {delay_s} /nobreak >nul & "
+            f"net stop {SERVICE_NAME} & "
+            f"net start {SERVICE_NAME}"
+        )
+        subprocess.Popen(
+            ["cmd", "/c", cmd_line],
+            creationflags=(
+                DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+            ),
+            close_fds=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
+
+    def _do_restart() -> None:
+        import time
+        time.sleep(delay)
+        _run_command(["systemctl", "restart", SERVICE_NAME])
+
+    threading.Thread(target=_do_restart, daemon=True).start()
+
+
+def apply_update(branch: str = "main") -> dict:
+    """Fetch, checkout del branch target, pull, pip install e riavvio servizio.
+
+    Equivalente a reinstall.bat:
+    1. git pull (con checkout al branch selezionato)
+    2. pip install -r requirements.txt
+    3. riavvio servizio (asincrono, dopo la risposta HTTP)
+
+    Ritorna dettagli e log di ogni step.
     """
     repo = _get_repo()
 
-    if repo.is_dirty(untracked_files=True):
+    if repo.is_dirty():
         raise ValueError(
             "Working tree con modifiche non committate. "
             "Committare o scartare le modifiche prima di aggiornare."
@@ -104,7 +173,9 @@ def apply_update(branch: str = "main") -> dict:
         old_branch = f"detached:{repo.head.commit.hexsha[:8]}"
 
     old_sha = repo.head.commit.hexsha[:8]
+    log_entries: list[dict] = []
 
+    # Step 1: fetch + checkout + pull
     repo.remotes.origin.fetch()
 
     local_branches = [ref.name for ref in repo.branches]
@@ -113,14 +184,36 @@ def apply_update(branch: str = "main") -> dict:
     else:
         repo.git.checkout("-b", branch, f"origin/{branch}")
 
-    repo.remotes.origin.pull()
+    try:
+        repo.remotes.origin.pull()
+        log_entries.append({"step": "git_pull", "success": True, "output": f"Aggiornato a origin/{branch}"})
+    except Exception as exc:
+        log_entries.append({"step": "git_pull", "success": False, "output": str(exc)})
+        raise ValueError(f"git pull fallito: {exc}") from exc
 
     new_sha = repo.head.commit.hexsha[:8]
+
+    # Step 2: pip install -r requirements.txt
+    pip_cmd = [sys.executable, "-m", "pip", "install", "-r", str(REQUIREMENTS), "--quiet"]
+    code, output = _run_command(pip_cmd)
+    log_entries.append({"step": "pip_install", "success": code == 0, "output": output or "OK"})
+    if code != 0:
+        logger.warning("pip install warning: %s", output)
+
+    # Step 3: lettura nuova versione dal file aggiornato
     new_version = (
         settings.VERSION_FILE.read_text().strip()
         if settings.VERSION_FILE.exists()
         else settings.version
     )
+
+    # Step 4: riavvio servizio in background (la risposta HTTP viene inviata prima)
+    _restart_service_async(delay=4.0)
+    log_entries.append({
+        "step": "service_restart",
+        "success": True,
+        "output": "Riavvio servizio avviato — l'applicazione sarà disponibile tra ~15 secondi",
+    })
 
     return {
         "success": True,
@@ -131,4 +224,5 @@ def apply_update(branch: str = "main") -> dict:
         "old_version": settings.version,
         "new_version": new_version,
         "restart_required": old_sha != new_sha,
+        "log": log_entries,
     }

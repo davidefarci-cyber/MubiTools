@@ -1,5 +1,5 @@
 /**
- * MUBI Tools — Modulo Incassi Mubi
+ * Grid — Modulo Incassi Mubi
  * UI stepper per upload e elaborazione file Excel
  */
 
@@ -31,9 +31,8 @@ const Incassi = {
         '2. Importo Aperto',
         '3. Piani Rientro',
         '4. Conferimento',
-        '5. Identico',
+        '5. Calcolo Incassato',
         '6. Controllo',
-        '7. Pivot',
     ],
 
     render(container) {
@@ -252,6 +251,8 @@ const Incassi = {
                     showToast(`Errore: ${data.message}`, 'error');
                     document.getElementById('progress-text').textContent = `Errore: ${data.message}`;
                     document.getElementById('progress-text').style.color = 'var(--accent-red)';
+                    // Mostra pannello debug in caso di errore
+                    this.showErrorDebug(data);
                 }
             }
         } catch {
@@ -273,17 +274,37 @@ const Incassi = {
 
     updateProgress(data) {
         const completed = data.phases.filter(p => p.status === 'completed').length;
-        const pct = Math.round((completed / 7) * 100);
+        const pct = Math.round((completed / 6) * 100);
         document.getElementById('progress-fill').style.width = `${pct}%`;
 
         const running = data.phases.find(p => p.status === 'running');
         if (running) {
             document.getElementById('progress-text').textContent =
-                `Fase ${running.phase}/7: ${running.name} — ${running.message}`;
+                `Fase ${running.phase}/6: ${running.name} — ${running.message}`;
         } else if (data.status === 'completed') {
             document.getElementById('progress-text').textContent = 'Elaborazione completata';
             document.getElementById('progress-fill').style.width = '100%';
             document.getElementById('progress-fill').style.backgroundColor = 'var(--accent-green)';
+        }
+    },
+
+    async downloadFile(jobId, fileType) {
+        try {
+            const res = await fetch(`/api/incassi/download/${jobId}/${fileType}`, {
+                headers: Auth.authHeaders()
+            });
+            if (!res.ok) throw new Error('Download fallito');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            App.showToast('Errore durante il download', 'error');
         }
     },
 
@@ -319,20 +340,21 @@ const Incassi = {
             ${data.message ? `<p style="color:var(--accent-amber);margin-bottom:16px;font-size:0.9rem;">${App.escapeHtml(data.message)}</p>` : ''}
 
             <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
-                <a class="btn btn-primary" href="/api/incassi/download/${data.job_id}/conferimento" target="_blank">
+                <button class="btn btn-primary" onclick="Incassi.downloadFile('${data.job_id}', 'conferimento')">
                     Scarica Conferimento Aggiornato
-                </a>
+                </button>
                 ${data.anomalie > 0 ? `
-                    <a class="btn btn-warn" href="/api/incassi/download/${data.job_id}/anomalie" target="_blank">
+                    <button class="btn btn-warn" onclick="Incassi.downloadFile('${data.job_id}', 'anomalie')">
                         Scarica Report Anomalie
-                    </a>` : ''}
+                    </button>` : ''}
                 ${data.nuove_righe > 0 ? `
-                    <a class="btn btn-edit" href="/api/incassi/download/${data.job_id}/nuove_righe" target="_blank">
+                    <button class="btn btn-edit" onclick="Incassi.downloadFile('${data.job_id}', 'nuove_righe')">
                         Scarica Nuove Righe
-                    </a>` : ''}
+                    </button>` : ''}
             </div>
 
             <div id="anomalie-table"></div>
+            <div id="debug-panel"></div>
 
             <div style="margin-top:20px;">
                 <button class="btn btn-cancel" id="btn-new-elaboration">Nuova Elaborazione</button>
@@ -347,6 +369,8 @@ const Incassi = {
         if (data.anomalie > 0) {
             this.loadAnomalieTable(data.job_id);
         }
+        // Carica pannello debug
+        this.loadDebugPanel(data.job_id);
     },
 
     async loadAnomalieTable(jobId) {
@@ -356,48 +380,119 @@ const Incassi = {
             if (!res.ok) return;
             const data = await res.json();
 
-            if (!data.anomalie.length && !data.correzioni.length) return;
+            if (!data.anomalie.length) return;
 
-            let html = '';
-            if (data.anomalie.length) {
-                html += `
-                    <div class="card-title" style="margin-top:16px;">Anomalie (${data.anomalie.length})</div>
-                    <div class="table-container">
-                        <table>
-                            <thead><tr><th>Nr. Bolletta</th><th>Tipo</th><th>Dettaglio</th></tr></thead>
-                            <tbody>
-                                ${data.anomalie.map(a => `
-                                    <tr>
-                                        <td>${App.escapeHtml(a.numero_bolletta)}</td>
-                                        <td><span class="badge badge-disabled">${App.escapeHtml(a.tipo)}</span></td>
-                                        <td style="color:var(--text-muted)">${App.escapeHtml(a.dettaglio)}</td>
-                                    </tr>`).join('')}
-                            </tbody>
-                        </table>
-                    </div>`;
-            }
-
-            if (data.correzioni.length) {
-                html += `
-                    <div class="card-title" style="margin-top:16px;">Correzioni manuali (${data.correzioni.length})</div>
-                    <div class="table-container">
-                        <table>
-                            <thead><tr><th>Nr. Bolletta</th><th>Tipo</th><th>Dettaglio</th></tr></thead>
-                            <tbody>
-                                ${data.correzioni.map(c => `
-                                    <tr>
-                                        <td>${App.escapeHtml(c.numero_bolletta)}</td>
-                                        <td><span class="badge" style="background:rgba(243,156,18,0.15);color:var(--accent-amber)">${App.escapeHtml(c.tipo)}</span></td>
-                                        <td style="color:var(--text-muted)">${App.escapeHtml(c.dettaglio)}</td>
-                                    </tr>`).join('')}
-                            </tbody>
-                        </table>
-                    </div>`;
-            }
+            const html = `
+                <div class="card-title" style="margin-top:16px;">Anomalie (${data.anomalie.length})</div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Nr. Fattura</th><th>Tipo</th><th>Dettaglio</th></tr></thead>
+                        <tbody>
+                            ${data.anomalie.map(a => `
+                                <tr>
+                                    <td>${App.escapeHtml(a.numero_bolletta)}</td>
+                                    <td><span class="badge badge-disabled">${App.escapeHtml(a.tipo)}</span></td>
+                                    <td style="color:var(--text-muted)">${App.escapeHtml(a.dettaglio)}</td>
+                                </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>`;
 
             container.innerHTML = html;
         } catch {
             // Ignore
         }
+    },
+
+    showErrorDebug(data) {
+        const resultsEl = document.getElementById('incassi-results');
+        resultsEl.style.display = 'block';
+        resultsEl.innerHTML = `
+            <div style="background:rgba(231,76,60,0.1);border:1px solid var(--accent-red);border-radius:8px;padding:16px;margin-bottom:16px;">
+                <div style="font-weight:600;color:var(--accent-red);margin-bottom:8px;">Errore nell'elaborazione</div>
+                <pre style="white-space:pre-wrap;word-break:break-word;font-size:0.8rem;color:var(--text-muted);margin:0;">${App.escapeHtml(data.message || 'Errore sconosciuto')}</pre>
+            </div>
+            <div id="debug-panel"></div>
+            <div style="margin-top:20px;">
+                <button class="btn btn-cancel" id="btn-new-elaboration">Nuova Elaborazione</button>
+            </div>
+        `;
+        document.getElementById('btn-new-elaboration').addEventListener('click', () => {
+            App.navigate('incassi');
+        });
+        this.loadDebugPanel(data.job_id);
+    },
+
+    async loadDebugPanel(jobId) {
+        const container = document.getElementById('debug-panel');
+        if (!container) return;
+        try {
+            const res = await Auth.apiRequest(`/api/incassi/result/${jobId}/debug`);
+            if (!res.ok) {
+                container.innerHTML = '<p style="color:var(--text-muted)">Debug info non disponibile</p>';
+                return;
+            }
+            const data = await res.json();
+            container.innerHTML = this.renderDebugHtml(data);
+        } catch {
+            container.innerHTML = '<p style="color:var(--text-muted)">Impossibile caricare debug info</p>';
+        }
+    },
+
+    renderDebugHtml(data) {
+        const debugInfo = data.debug_info || [];
+        if (!debugInfo.length && !data.error_message) {
+            return '<p style="color:var(--text-muted)">Nessuna info debug disponibile</p>';
+        }
+
+        let html = `
+            <details style="margin-top:16px;" open>
+                <summary style="cursor:pointer;font-weight:600;color:var(--accent-amber);margin-bottom:12px;font-size:0.95rem;">
+                    Debug — Dettagli file e colonne
+                </summary>
+                <div style="background:var(--bg-secondary);border-radius:8px;padding:16px;font-family:monospace;font-size:0.8rem;">`;
+
+        for (const info of debugInfo) {
+            const matchedKeys = Object.keys(info.columns_matched || {});
+            const missingKeys = Object.keys(info.columns_missing || {});
+            const hasMissing = missingKeys.length > 0;
+            const borderColor = hasMissing ? 'var(--accent-red)' : 'var(--accent-green)';
+
+            html += `
+                <div style="border-left:3px solid ${borderColor};padding:8px 12px;margin-bottom:12px;">
+                    <div style="font-weight:600;color:var(--text-primary);margin-bottom:4px;">
+                        ${App.escapeHtml(info.file)}
+                    </div>
+                    <div style="color:var(--text-muted);margin-bottom:4px;">
+                        Foglio usato: <strong>${App.escapeHtml(info.sheet_used || '—')}</strong>
+                        &nbsp;|&nbsp; Fogli disponibili: ${(info.sheets_available || []).map(s => App.escapeHtml(s)).join(', ')}
+                    </div>`;
+
+            if (matchedKeys.length > 0) {
+                html += `<div style="color:var(--accent-green);margin-bottom:2px;">Colonne trovate: ${
+                    matchedKeys.map(k => `${App.escapeHtml(k)} → "${App.escapeHtml(info.columns_matched[k])}"`).join(', ')
+                }</div>`;
+            }
+
+            if (hasMissing) {
+                html += `<div style="color:var(--accent-red);margin-bottom:2px;">Colonne MANCANTI: ${
+                    missingKeys.map(k => `<strong>${App.escapeHtml(k)}</strong>`).join(', ')
+                }</div>`;
+            }
+
+            html += `
+                    <details style="margin-top:4px;">
+                        <summary style="cursor:pointer;color:var(--text-muted);font-size:0.75rem;">
+                            Tutte le colonne nel foglio (${(info.columns || []).length})
+                        </summary>
+                        <div style="margin-top:4px;color:var(--text-muted);word-break:break-all;">
+                            ${(info.columns || []).map(c => App.escapeHtml(c)).join(' | ')}
+                        </div>
+                    </details>
+                </div>`;
+        }
+
+        html += '</div></details>';
+        return html;
     }
 };

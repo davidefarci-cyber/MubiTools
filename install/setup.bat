@@ -2,11 +2,11 @@
 setlocal EnableDelayedExpansion
 
 REM ============================================================
-REM MUBI Tools — Setup automatico per Windows Server
+REM Grid — Setup automatico per Windows Server
 REM Eseguire come Amministratore
 REM ============================================================
 
-set "APP_NAME=MUBI Tools"
+set "APP_NAME=Grid"
 set "INSTALL_DIR=C:\mubi-tools"
 set "GITHUB_REPO=davidefarci-cyber/MubiTools"
 set "GITHUB_URL=https://github.com/%GITHUB_REPO%.git"
@@ -198,7 +198,9 @@ echo [%date% %time%] STEP 5 OK - .env configurato >> "%LOG_FILE%"
 REM ─── STEP 6: Creazione struttura cartelle ───────────────────
 echo.
 echo [STEP 6/13] Creazione cartelle...
+if not exist "%INSTALL_DIR%\data" mkdir "%INSTALL_DIR%\data"
 if not exist "%INSTALL_DIR%\data\uploads" mkdir "%INSTALL_DIR%\data\uploads"
+if not exist "%INSTALL_DIR%\data\backups" mkdir "%INSTALL_DIR%\data\backups"
 if not exist "%INSTALL_DIR%\database" mkdir "%INSTALL_DIR%\database"
 if not exist "%INSTALL_DIR%\logs" mkdir "%INSTALL_DIR%\logs"
 echo   OK - Cartelle create
@@ -221,6 +223,44 @@ if %errorlevel% neq 0 (
 )
 echo   OK - Dipendenze installate
 echo [%date% %time%] STEP 7 OK - Dipendenze installate >> "%LOG_FILE%"
+
+REM ─── STEP 7b: Verifica LibreOffice (soffice.exe) ───────────
+echo.
+echo [STEP 7b] Verifica LibreOffice per generazione PDF...
+where soffice.exe >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   OK - soffice.exe trovato nel PATH
+    echo [%date% %time%] STEP 7b OK - soffice.exe nel PATH >> "%LOG_FILE%"
+) else (
+    REM Controlla i percorsi di installazione comuni
+    set "SOFFICE_FOUND="
+    if exist "C:\Program Files\LibreOffice\program\soffice.exe" set "SOFFICE_FOUND=C:\Program Files\LibreOffice\program"
+    if exist "C:\Program Files (x86)\LibreOffice\program\soffice.exe" set "SOFFICE_FOUND=C:\Program Files (x86)\LibreOffice\program"
+
+    if defined SOFFICE_FOUND (
+        echo   LibreOffice trovato in: !SOFFICE_FOUND!
+        echo   Aggiunta al PATH di sistema...
+        setx PATH "%PATH%;!SOFFICE_FOUND!" /M >nul 2>&1
+        set "PATH=%PATH%;!SOFFICE_FOUND!"
+        echo   OK - soffice.exe aggiunto al PATH
+        echo [%date% %time%] STEP 7b OK - soffice.exe aggiunto al PATH da !SOFFICE_FOUND! >> "%LOG_FILE%"
+    ) else (
+        echo.
+        echo   ============================================================
+        echo   ATTENZIONE: LibreOffice NON trovato!
+        echo   ============================================================
+        echo   Il modulo Invio REMI richiede LibreOffice per generare i PDF.
+        echo   Senza LibreOffice l'invio PEC con allegato PDF non funzionera'.
+        echo.
+        echo   Installare LibreOffice da: https://www.libreoffice.org/download
+        echo   Dopo l'installazione rilanciare questo setup oppure aggiungere
+        echo   manualmente al PATH di sistema la cartella:
+        echo     C:\Program Files\LibreOffice\program
+        echo   ============================================================
+        echo.
+        echo [%date% %time%] WARNING: LibreOffice non trovato >> "%LOG_FILE%"
+    )
+)
 
 REM ─── STEP 8: Download e configurazione NSSM ─────────────────
 echo.
@@ -252,7 +292,7 @@ REM Rimuovi servizio esistente
 REM Registra nuovo servizio
 "%INSTALL_DIR%\install\nssm.exe" install %SERVICE_NAME% "%INSTALL_DIR%\venv\Scripts\python.exe" "-m uvicorn app.main:app --host 0.0.0.0 --port !APP_PORT!"
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% AppDirectory "%INSTALL_DIR%"
-"%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% Description "MUBI Tools - Gestione incassi"
+"%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% Description "Grid - Automazione backoffice utility elettrica/gas"
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% Start SERVICE_AUTO_START
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% AppStdout "%INSTALL_DIR%\logs\service.log"
 "%INSTALL_DIR%\install\nssm.exe" set %SERVICE_NAME% AppStderr "%INSTALL_DIR%\logs\service.log"
@@ -265,8 +305,10 @@ echo [%date% %time%] STEP 9 OK - Servizio registrato >> "%LOG_FILE%"
 REM ─── STEP 10: Regola firewall ───────────────────────────────
 echo.
 echo [STEP 10/13] Configurazione firewall...
+REM Rimuove regole vecchie e nuove (idempotente; gestisce rebrand da versioni precedenti)
 netsh advfirewall firewall delete rule name="MUBI Tools Web App" >nul 2>&1
-netsh advfirewall firewall add rule name="MUBI Tools Web App" dir=in action=allow protocol=TCP localport=!APP_PORT! >nul 2>&1
+netsh advfirewall firewall delete rule name="Grid Web App" >nul 2>&1
+netsh advfirewall firewall add rule name="Grid Web App" dir=in action=allow protocol=TCP localport=!APP_PORT! >nul 2>&1
 echo   OK - Porta !APP_PORT! aperta nel firewall
 echo [%date% %time%] STEP 10 OK - Firewall porta !APP_PORT! >> "%LOG_FILE%"
 
@@ -296,11 +338,22 @@ echo   Tentativo !ATTEMPTS!/15...
 goto wait_loop
 
 :step12
-REM ─── STEP 12: Primo avvio database ──────────────────────────
+REM ─── STEP 12: Primo avvio database e chiave cifratura ───────
 echo.
-echo [STEP 12/13] Database...
+echo [STEP 12/13] Database e chiave cifratura...
 echo   Il database e l'utente admin vengono creati automaticamente al primo avvio.
-echo [%date% %time%] STEP 12 OK - Database auto-init >> "%LOG_FILE%"
+if not exist "%INSTALL_DIR%\data\secret.key" (
+    echo   Generazione chiave cifratura Fernet...
+    "%INSTALL_DIR%\venv\Scripts\python.exe" -c "from app.utils.encryption import _get_fernet; _get_fernet()" 2>>"%LOG_FILE%"
+    if exist "%INSTALL_DIR%\data\secret.key" (
+        echo   OK - Chiave cifratura generata in data\secret.key
+    ) else (
+        echo   ATTENZIONE: Chiave cifratura verra' generata al primo avvio dell'app.
+    )
+) else (
+    echo   Chiave cifratura esistente, mantenuta.
+)
+echo [%date% %time%] STEP 12 OK - Database auto-init + secret.key >> "%LOG_FILE%"
 
 REM ─── STEP 13: Riepilogo finale ──────────────────────────────
 echo.

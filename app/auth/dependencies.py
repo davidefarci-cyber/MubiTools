@@ -1,5 +1,7 @@
 """Dependency injection per l'autenticazione."""
 
+from collections.abc import Callable
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
@@ -45,3 +47,17 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
             detail="Accesso riservato agli amministratori",
         )
     return current_user
+
+
+def require_module(module_name: str) -> Callable[[User], User]:
+    """Factory: restituisce una dependency FastAPI che verifica l'accesso al modulo."""
+
+    def _checker(current_user: User = Depends(get_current_user)) -> User:
+        if not current_user.has_module(module_name):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Modulo non abilitato",
+            )
+        return current_user
+
+    return _checker

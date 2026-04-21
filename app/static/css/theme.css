@@ -1,4 +1,4 @@
-/* MUBI Tools — Dark Theme */
+/* Grid — Dark Theme */
 
 :root {
     --bg-primary:   #0D1117;
@@ -66,17 +66,31 @@ a:hover {
     padding: 20px;
     border-bottom: 1px solid var(--border);
     text-align: center;
-}
-
-.sidebar-logo h1 {
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: var(--accent);
+    color: var(--text-primary);
 }
 
 .sidebar-logo span {
+    display: block;
+    margin-top: 6px;
     font-size: 0.75rem;
     color: var(--text-muted);
+}
+
+.brand-logo {
+    display: inline-block;
+    max-width: 100%;
+    height: auto;
+    color: var(--text-primary);
+}
+
+.brand-logo--sidebar {
+    width: 160px;
+}
+
+.brand-logo--login {
+    width: 220px;
+    display: block;
+    margin: 0 auto 8px;
 }
 
 .sidebar-nav {
@@ -128,6 +142,8 @@ a:hover {
     display: flex;
     flex-direction: column;
     min-height: 100vh;
+    min-width: 0;
+    overflow-x: hidden;
 }
 
 /* Topbar */
@@ -325,6 +341,11 @@ tr:hover {
 
 @keyframes spin {
     to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
 }
 
 /* Upload dropzone */
@@ -566,6 +587,33 @@ tr:hover {
 .modal-body hr {
     border: none;
     border-top: 1px solid var(--border);
+}
+
+/* Module sub-tabs */
+.module-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+}
+
+.module-tab {
+    padding: 10px 20px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    transition: color var(--transition), border-color var(--transition);
+}
+
+.module-tab:hover {
+    color: var(--text-primary);
+}
+
+.module-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
 }
 
 /* Responsive */

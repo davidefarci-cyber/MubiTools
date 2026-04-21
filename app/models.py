@@ -1,9 +1,9 @@
-"""Modelli ORM per il database MUBI Tools."""
+"""Modelli ORM per il database Grid."""
 
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from app.database import Base
@@ -20,7 +20,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(String(10), nullable=False, default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    allowed_modules: Mapped[str] = mapped_column(Text, default='["incassi_mubi"]')
+    allowed_modules: Mapped[str] = mapped_column(Text, default='["incassi_mubi","connessione"]')
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -58,6 +58,53 @@ class AuditLog(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped[User | None] = relationship(back_populates="audit_logs")
+
+
+class PecAccount(Base):
+    """Account PEC configurati (solo admin)."""
+
+    __tablename__ = "pec_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    username: Mapped[str] = mapped_column(Text, nullable=False)
+    encrypted_password: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class DlRegistry(Base):
+    """Anagrafica distributori locali."""
+
+    __tablename__ = "dl_registry"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    company_name: Mapped[str] = mapped_column(Text, nullable=False)
+    vat_number: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    pec_address: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class RemiPractice(Base):
+    """Storico pratiche REMI."""
+
+    __tablename__ = "remi_practices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    vat_number: Mapped[str] = mapped_column(Text, nullable=False)
+    company_name: Mapped[str] = mapped_column(Text, nullable=False)
+    pec_address: Mapped[str] = mapped_column(Text, nullable=False)
+    remi_code: Mapped[str] = mapped_column(Text, nullable=False)
+    effective_date: Mapped[datetime | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    batch_id: Mapped[str] = mapped_column(Text, nullable=False)
+    send_batch_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 def log_audit(
