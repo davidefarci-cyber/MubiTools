@@ -344,8 +344,8 @@ const CaricamentoRemi = {
                         </select>
                     </div>
                     <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:200px;">
-                        <label style="font-size:0.8rem;color:var(--text-muted);">Ragione Sociale / P.IVA</label>
-                        <input type="text" id="dash-filter-search" placeholder="Cerca..." style="padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.9rem;">
+                        <label style="font-size:0.8rem;color:var(--text-muted);">Ragione Sociale / P.IVA / Codice REMI</label>
+                        <input type="text" id="dash-filter-search" placeholder="Cerca per ragione sociale, P.IVA o codice REMI..." style="padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-primary);font-size:0.9rem;">
                     </div>
                     <div style="display:flex;flex-direction:column;gap:4px;">
                         <label style="font-size:0.8rem;color:var(--text-muted);">Data decorrenza da</label>
@@ -669,7 +669,7 @@ const CaricamentoRemi = {
                         throw new Error(err.detail || 'Errore cambio stato');
                     }
                     const result = await res.json();
-                    showToast(`${result.updated} pratiche aggiornate a "${targetLabel}"`, 'success');
+                    showToast(`${result.updated} pratiche aggiornate a \"${targetLabel}\"`, 'success');
                     this.loadDashboardData();
                 } catch (err) {
                     showToast(err.message, 'error');
