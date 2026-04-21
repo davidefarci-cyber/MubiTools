@@ -156,7 +156,9 @@ def list_practice_history(
     if search:
         pattern = f"%{search.strip()}%"
         query = query.filter(
-            RemiPractice.company_name.ilike(pattern) | RemiPractice.vat_number.ilike(pattern)
+            RemiPractice.company_name.ilike(pattern)
+            | RemiPractice.vat_number.ilike(pattern)
+            | RemiPractice.remi_code.ilike(pattern)
         )
     if date_from:
         query = query.filter(RemiPractice.effective_date >= date_from)
