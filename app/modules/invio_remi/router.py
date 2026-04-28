@@ -18,12 +18,30 @@ from app.modules.invio_remi.schemas import (
     DlRegistryOut,
     DlRegistryUpdate,
 )
+from app.admin import pec_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 MODULE_NAME = "invio_remi"
+
+
+@router.get("/pec")
+def list_active_pec(
+    current_user: User = Depends(require_module(MODULE_NAME)),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Lista PEC attive per la selezione nelle impostazioni di invio REMI.
+
+    Endpoint dedicato al modulo (non admin): restituisce solo i campi
+    necessari al dropdown (id, label, email), filtra a is_active=True.
+    """
+    return [
+        {"id": p.id, "label": p.label, "email": p.email}
+        for p in pec_service.list_pec_accounts(db)
+        if p.is_active
+    ]
 
 
 @router.get("/settings")

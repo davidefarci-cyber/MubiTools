@@ -78,9 +78,15 @@ const InvioRemi = {
 
     async loadPecAccounts() {
         try {
-            const res = await Auth.apiRequest('/admin/pec');
-            if (res.ok) this.pecAccounts = await res.json();
-        } catch { /* ignore */ }
+            const res = await Auth.apiRequest('/api/invio-remi/pec');
+            if (res.ok) {
+                this.pecAccounts = await res.json();
+            } else {
+                this.pecAccounts = [];
+            }
+        } catch {
+            this.pecAccounts = [];
+        }
     },
 
     // --- Tabella pending ---
