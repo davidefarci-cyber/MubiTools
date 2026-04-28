@@ -35,10 +35,10 @@ def list_active_pec(
     """Lista PEC attive per la selezione nelle impostazioni di invio REMI.
 
     Endpoint dedicato al modulo (non admin): restituisce solo i campi
-    necessari al dropdown (id, label, email), filtra a is_active=True.
+    necessari al dropdown (id, label, email, is_active), filtra a is_active=True.
     """
     return [
-        {"id": p.id, "label": p.label, "email": p.email}
+        {"id": p.id, "label": p.label, "email": p.email, "is_active": p.is_active}
         for p in pec_service.list_pec_accounts(db)
         if p.is_active
     ]
