@@ -5,6 +5,7 @@ Legge un file Excel (FILE B), mappa le colonne verso il formato FILE A,
 applica trasformazioni sui valori e scrive il risultato come nuovo foglio.
 """
 
+import csv
 import io
 import logging
 import uuid
@@ -14,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from app.shared.excel_mapper import find_column
 
@@ -388,4 +389,193 @@ def estrai_pod_xml(file_path: Path, pod_list: list[str], upload_dir: Path) -> di
         "found": sorted(found.keys()),
         "not_found": not_found,
         "total_requested": len(pods),
+    }
+
+
+# ===========================================================================
+# S01 Massivo — generazione CSV + XLSX nel formato S01 da Excel pratiche
+# ===========================================================================
+
+S01_HEADER_FISSI: tuple[str, str, str, str, str] = (
+    "S01",
+    "0050",
+    "03443420231",
+    "DP2032",
+    "05779711000",
+)
+
+S01_USO_MAP: dict[str, tuple[str, str]] = {
+    "ALTRI USI": ("03", "930"),
+    "DOMESTICO NON RESIDENTE": ("02", "001"),
+    "DOMESTICO RESIDENTE": ("01", "001"),
+}
+
+S01_HEADER: list[str] = [
+    "COD_SERVIZIO", "COD_FLUSSO", "PIVA_UTENTE", "COD_CONTR_DISP", "PIVA_DISTR",
+    "COD_PRAT_UTENTE", "COD_POD", "COGNOME", "NOME", "RAG_SOC", "CF", "PIVA", "TEL",
+    "PRESENZA_CLIENTE_NO_TELEGESTITO",
+    "TOPONIMO_1", "VIA_1", "CIV_1", "CAP_1", "ISTAT_1", "LOCALITA_1", "PROV_1", "NAZIONE_1", "PRESSO",
+    "TOPONIMO_2", "VIA_2", "CIV_2", "CAP_2", "ISTAT_2", "LOCALITA_2", "PROV_2", "NAZIONE_2",
+    "TIPO_CONTRATTO", "SETT_MERCEOLOGICO",
+    "TRATTAMENTO_IVA", "STAG_RIC", "DATA_INIZIO", "DATA_FINE",
+    "SOLLEV_PERSONE", "AUTOCERT_SOLL_PERS", "AUTOCERT_CONTR_CONNESSIONE",
+    "SERVIZIO_CURVE_CARICO", "MAND_CONN", "DISALIMENTABILE",
+    "CATEGORIA_DISALIMENTABILITA",
+    "AUTOCERT_ACQUISIZIONE_CERTIFICAZIONE_ASL",
+    "TEL_CELL_PREAVVISO_PERSONALIZZATO_PESSE",
+    "AUTOCERT_LIBERATORIA_MANCATO_AVVISO_PESSE",
+    "NOTE", "CATEGORIA_CLIENTE", "DA_ESEGUIRE_NON_PRIMA_DEL",
+]
+
+# Mappa colonna logica -> candidati varianti per find_column
+S01_INPUT_COLUMNS: dict[str, list[str]] = {
+    "CodiceVenditore": ["CodiceVenditore", "Codice Venditore", "COD_VENDITORE", "CODICE VENDITORE"],
+    "POD": ["POD"],
+    "COGNOME": ["COGNOME"],
+    "NOME": ["NOME"],
+    "RAGSOC": ["RAGSOC", "RAG_SOC", "RAGIONE SOCIALE"],
+    "CF": ["CF", "CODICE FISCALE"],
+    "PIVA": ["PIVA", "P. IVA", "P.IVA", "PARTITA IVA"],
+    "TELREFPRAT": ["TELREFPRAT", "TELEFONO", "TEL"],
+    "USO": ["USO", "TIPO USO"],
+}
+
+
+def _resolve_s01_columns(df: pd.DataFrame) -> tuple[dict[str, str | None], list[str]]:
+    """Risolve i nomi reali delle colonne nel DataFrame, accumulando warnings."""
+    resolved: dict[str, str | None] = {}
+    warnings: list[str] = []
+    for logical, candidates in S01_INPUT_COLUMNS.items():
+        col = find_column(df, candidates, mode="exact")
+        if col is None:
+            col = find_column(df, candidates, mode="substring")
+        resolved[logical] = col
+        if col is None:
+            warnings.append(f"Colonna '{logical}' non trovata (cercati: {', '.join(candidates)})")
+    return resolved, warnings
+
+
+def _build_s01_row(
+    df: pd.DataFrame,
+    row_idx: int,
+    resolved: dict[str, str | None],
+    uso_warnings: set[str],
+) -> list[str]:
+    """Costruisce una riga S01 a 50 colonne nello stesso ordine di S01_HEADER."""
+
+    def get(logical: str) -> str:
+        col = resolved.get(logical)
+        if col is None:
+            return ""
+        return _clean_val(df[col].iloc[row_idx])
+
+    uso_raw = get("USO").upper()
+    if uso_raw in S01_USO_MAP:
+        tipo_contratto, sett_merceologico = S01_USO_MAP[uso_raw]
+    else:
+        tipo_contratto, sett_merceologico = "", ""
+        if uso_raw:
+            uso_warnings.add(f"USO non mappato: '{uso_raw}'")
+
+    return [
+        # Header fissi (5)
+        *S01_HEADER_FISSI,
+        # Input (8)
+        get("CodiceVenditore"),
+        get("POD"),
+        get("COGNOME"),
+        get("NOME"),
+        get("RAGSOC"),
+        get("CF"),
+        get("PIVA"),
+        get("TELREFPRAT"),
+        # Presenza cliente
+        "SI",
+        # Indirizzo 1 (9)
+        "", "", "", "", "", "", "", "", "",
+        # Indirizzo 2 (8)
+        "", "", "", "", "", "", "", "",
+        # Codici (2)
+        tipo_contratto,
+        sett_merceologico,
+        # Extra date (4)
+        "", "", "", "",
+        # Sollev/Autocert (3)
+        "NO", "NO", "01",
+        # Servizio/Mand/Disalim (3)
+        "", "SI", "SI",
+        # Trailing (7)
+        "", "", "", "", "", "", "",
+    ]
+
+
+def genera_s01_massivo(file_path: Path, upload_dir: Path) -> dict:
+    """Genera CSV + XLSX nel formato S01 Massivo dal file Excel pratiche.
+
+    Args:
+        file_path: Path al file Excel sorgente.
+        upload_dir: Directory dove salvare CSV e XLSX di output.
+
+    Returns:
+        dict con keys: job_id, csv_path, xlsx_path, rows_created, columns,
+        rows_preview, warnings.
+    """
+    logger.info("Genera S01 Massivo: lettura %s", file_path.name)
+
+    df = pd.read_excel(
+        file_path,
+        dtype=str,
+        keep_default_na=False,
+        engine="openpyxl",
+    )
+    df.columns = df.columns.str.strip()
+
+    if len(df) == 0:
+        raise ValueError("Il file non contiene righe di dati")
+
+    resolved, warnings = _resolve_s01_columns(df)
+
+    uso_warnings: set[str] = set()
+    rows: list[list[str]] = []
+    for i in range(len(df)):
+        row = _build_s01_row(df, i, resolved, uso_warnings)
+        # Scarta righe completamente vuote nei campi input (no POD, no anagrafica)
+        input_values = row[5:13]
+        if not any(v for v in input_values):
+            continue
+        rows.append(row)
+
+    if not rows:
+        raise ValueError("Nessuna riga valida trovata nel file")
+
+    all_warnings = sorted(set(warnings) | uso_warnings)
+
+    job_id = str(uuid.uuid4())
+    csv_path = upload_dir / f"s01_massivo_{job_id}.csv"
+    xlsx_path = upload_dir / f"s01_massivo_{job_id}.xlsx"
+
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow(S01_HEADER)
+        writer.writerows(rows)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "S01"
+    ws.append(S01_HEADER)
+    for r in rows:
+        ws.append(r)
+    wb.save(xlsx_path)
+    wb.close()
+
+    logger.info("Genera S01 Massivo: %d righe -> %s, %s", len(rows), csv_path.name, xlsx_path.name)
+
+    return {
+        "job_id": job_id,
+        "csv_path": str(csv_path),
+        "xlsx_path": str(xlsx_path),
+        "rows_created": len(rows),
+        "columns": S01_HEADER,
+        "rows_preview": rows,
+        "warnings": all_warnings,
     }
