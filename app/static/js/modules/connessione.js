@@ -9,10 +9,14 @@ const Connessione = {
     fileName: null,
     xmlFileId: null,
     xmlFileName: null,
+    s01FileId: null,
+    s01FileName: null,
+    s01JobId: null,
 
     subTabs: [
         { key: 'crea-riga', label: 'Crea riga per CONNESSIONI' },
         { key: 'estrai-pod', label: 'Estrai POD XML' },
+        { key: 's01-massivo', label: 'S01 Massivo' },
     ],
 
     render(container) {
@@ -47,6 +51,9 @@ const Connessione = {
         this.fileName = null;
         this.xmlFileId = null;
         this.xmlFileName = null;
+        this.s01FileId = null;
+        this.s01FileName = null;
+        this.s01JobId = null;
     },
 
     renderSubTab() {
@@ -57,6 +64,9 @@ const Connessione = {
                 break;
             case 'estrai-pod':
                 this.renderEstraiPod(content);
+                break;
+            case 's01-massivo':
+                this.renderS01Massivo(content);
                 break;
             default:
                 content.innerHTML = '<p style="color:var(--text-muted);padding:20px;">Sottosezione non trovata.</p>';
@@ -582,6 +592,262 @@ const Connessione = {
             const a = document.createElement('a');
             a.href = url;
             a.download = `pod_extract_${jobId}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            showToast('Errore durante il download', 'error');
+        }
+    },
+
+    // -----------------------------------------------------------------------
+    // Tab: S01 Massivo
+    // -----------------------------------------------------------------------
+
+    renderS01Massivo(container) {
+        this.s01FileId = null;
+        this.s01FileName = null;
+        this.s01JobId = null;
+
+        container.innerHTML = `
+            <div id="s01-upload-section">
+                <p style="color:var(--text-muted);margin-bottom:16px;">
+                    Carica il file Excel pratiche per generare i file <strong>S01_MASSIVO.csv</strong> e
+                    <strong>S01_MASSIVO.xlsx</strong> nel formato S01.
+                </p>
+
+                <div class="upload-box">
+                    <div class="dropzone" id="s01-dropzone">
+                        <div class="dropzone-icon">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                        </div>
+                        <p class="dropzone-title">File Excel</p>
+                        <p class="dropzone-hint">.xlsx, .xls — trascina o clicca per selezionare</p>
+                        <p class="dropzone-filename" id="s01-filename"></p>
+                    </div>
+                    <input type="file" id="s01-fileinput" accept=".xlsx,.xls" style="display:none;">
+                </div>
+            </div>
+
+            <div id="s01-processing" style="display:none;margin-top:20px;">
+                <div class="spinner" style="margin:0 auto;"></div>
+                <p style="text-align:center;color:var(--text-muted);margin-top:12px;">Elaborazione in corso...</p>
+            </div>
+
+            <div id="s01-results" style="display:none;min-width:0;overflow:hidden;margin-top:16px;"></div>
+        `;
+
+        this.bindS01Events();
+    },
+
+    bindS01Events() {
+        const dropzone = document.getElementById('s01-dropzone');
+        const input = document.getElementById('s01-fileinput');
+
+        dropzone.addEventListener('click', () => input.click());
+
+        input.addEventListener('change', () => {
+            if (input.files.length > 0) this.handleS01File(input.files[0]);
+        });
+
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('dragover');
+        });
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('dragover');
+        });
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) this.handleS01File(e.dataTransfer.files[0]);
+        });
+    },
+
+    async handleS01File(file) {
+        const fnameEl = document.getElementById('s01-filename');
+        const dropzone = document.getElementById('s01-dropzone');
+
+        fnameEl.textContent = `Caricamento ${file.name}...`;
+        fnameEl.style.color = 'var(--accent-amber)';
+        dropzone.style.borderColor = 'var(--accent-amber)';
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const res = await Auth.apiRequest('/api/connessione/upload', {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore upload');
+            }
+
+            const data = await res.json();
+            this.s01FileId = data.file_id;
+            this.s01FileName = data.original_filename;
+
+            fnameEl.textContent = `${data.original_filename} — elaborazione...`;
+            fnameEl.style.color = 'var(--accent-amber)';
+
+            await this.processS01File();
+
+        } catch (err) {
+            fnameEl.textContent = `Errore: ${err.message}`;
+            fnameEl.style.color = 'var(--accent-red)';
+            dropzone.style.borderColor = 'var(--accent-red)';
+            this.s01FileId = null;
+            this.s01FileName = null;
+        }
+    },
+
+    async processS01File() {
+        if (!this.s01FileId) return;
+
+        document.getElementById('s01-upload-section').style.display = 'none';
+        document.getElementById('s01-processing').style.display = 'block';
+        document.getElementById('s01-results').style.display = 'none';
+
+        try {
+            const res = await Auth.apiRequest('/api/connessione/s01-massivo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_id: this.s01FileId }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Errore elaborazione');
+            }
+
+            const data = await res.json();
+            this.s01JobId = data.job_id;
+            this.showS01Results(data);
+            showToast(`${data.rows_created} riga/e generata/e`, 'success');
+
+        } catch (err) {
+            showToast(err.message, 'error');
+            document.getElementById('s01-upload-section').style.display = 'block';
+            document.getElementById('s01-results').style.display = 'block';
+            document.getElementById('s01-results').innerHTML = `
+                <div style="background:rgba(231,76,60,0.1);border:1px solid var(--accent-red);border-radius:8px;padding:16px;margin-top:16px;">
+                    <div style="font-weight:600;color:var(--accent-red);margin-bottom:8px;">Errore</div>
+                    <p style="color:var(--text-muted);margin:0;">${App.escapeHtml(err.message)}</p>
+                </div>
+            `;
+        } finally {
+            document.getElementById('s01-processing').style.display = 'none';
+        }
+    },
+
+    showS01Results(data) {
+        const resultsEl = document.getElementById('s01-results');
+        resultsEl.style.display = 'block';
+
+        const columns = data.columns || [];
+        const rows = data.rows_preview || [];
+
+        const thHtml = columns.map(c => `<th>${App.escapeHtml(c)}</th>`).join('');
+        const tbodyHtml = rows.map(row => {
+            const cells = row.map(v => `<td>${App.escapeHtml(v)}</td>`).join('');
+            return `<tr>${cells}</tr>`;
+        }).join('');
+
+        let warningsHtml = '';
+        if (data.warnings && data.warnings.length > 0) {
+            warningsHtml = `
+                <div style="background:rgba(243,156,18,0.1);border:1px solid var(--accent-amber);border-radius:8px;padding:16px;margin-top:16px;">
+                    <div style="font-weight:600;color:var(--accent-amber);margin-bottom:8px;">
+                        Attenzione (${data.warnings.length})
+                    </div>
+                    <ul style="margin:0;padding-left:20px;color:var(--text-muted);font-size:0.85rem;">
+                        ${data.warnings.map(w => `<li>${App.escapeHtml(w)}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+
+        resultsEl.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px;">
+                <div class="stat-card">
+                    <div class="stat-label">Righe generate</div>
+                    <div class="stat-value" style="color:var(--accent-green)">${data.rows_created}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avvisi</div>
+                    <div class="stat-value" style="color:${data.warnings.length > 0 ? 'var(--accent-amber)' : 'var(--text-primary)'}">${data.warnings.length}</div>
+                </div>
+            </div>
+
+            <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;min-width:0;width:100%;">
+                <div style="overflow:auto;max-height:260px;width:100%;">
+                    <table id="s01-table" style="border-collapse:collapse;font-size:0.78rem;white-space:nowrap;">
+                        <thead>
+                            <tr style="position:sticky;top:0;background:var(--bg-secondary);z-index:1;">
+                                ${thHtml}
+                            </tr>
+                        </thead>
+                        <tbody>${tbodyHtml}</tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
+                <button class="btn btn-primary" id="s01-btn-download-csv">Scarica CSV</button>
+                <button class="btn btn-primary" id="s01-btn-download-xlsx">Scarica XLSX</button>
+                <button class="btn btn-cancel" id="s01-btn-new">Nuova Elaborazione</button>
+            </div>
+
+            ${warningsHtml}
+        `;
+
+        resultsEl.querySelectorAll('th').forEach(th => {
+            Object.assign(th.style, {
+                padding: '8px 10px',
+                textAlign: 'left',
+                fontWeight: '600',
+                color: 'var(--text-primary)',
+                borderBottom: '2px solid var(--border)',
+                fontSize: '0.72rem',
+            });
+        });
+        resultsEl.querySelectorAll('td').forEach(td => {
+            Object.assign(td.style, {
+                padding: '6px 10px',
+                color: 'var(--text-muted)',
+                borderBottom: '1px solid var(--border)',
+            });
+        });
+
+        document.getElementById('s01-btn-download-csv').addEventListener('click', () => {
+            this.downloadS01Result('csv');
+        });
+        document.getElementById('s01-btn-download-xlsx').addEventListener('click', () => {
+            this.downloadS01Result('xlsx');
+        });
+        document.getElementById('s01-btn-new').addEventListener('click', () => {
+            this.renderS01Massivo(document.getElementById('conn-subtab-content'));
+        });
+    },
+
+    async downloadS01Result(format) {
+        if (!this.s01JobId) return;
+        try {
+            const res = await fetch(`/api/connessione/s01-massivo/download/${this.s01JobId}/${format}`, {
+                headers: Auth.authHeaders(),
+            });
+            if (!res.ok) throw new Error('Download fallito');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = format === 'csv' ? 'S01_MASSIVO.csv' : 'S01_MASSIVO.xlsx';
             document.body.appendChild(a);
             a.click();
             a.remove();

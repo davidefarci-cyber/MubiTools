@@ -14,7 +14,11 @@ from app.auth.dependencies import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.models import User, log_audit
-from app.modules.connessione.service import genera_righe_connessione, estrai_pod_xml
+from app.modules.connessione.service import (
+    estrai_pod_xml,
+    genera_righe_connessione,
+    genera_s01_massivo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +26,9 @@ router = APIRouter()
 
 # Store risultati in-memory (XML)
 _xml_results: dict[str, dict] = {}
+
+# Store risultati in-memory (S01 Massivo)
+_s01_results: dict[str, dict] = {}
 
 ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
 ALLOWED_XML_EXTENSIONS = {".xml"}
@@ -303,4 +310,114 @@ def download_xml_result(
         path=zip_path,
         filename=f"pod_extract_{job_id}.zip",
         media_type="application/zip",
+    )
+
+
+# ---------------------------------------------------------------------------
+# S01 Massivo endpoints
+# ---------------------------------------------------------------------------
+
+
+class S01MassivoRequest(BaseModel):
+    """Richiesta generazione S01 Massivo."""
+
+    file_id: str
+
+
+class S01MassivoResponse(BaseModel):
+    """Risposta generazione S01 Massivo."""
+
+    job_id: str
+    rows_created: int
+    columns: list[str]
+    rows_preview: list[list[str]]
+    warnings: list[str]
+    download_ready: bool
+
+
+@router.post("/s01-massivo", response_model=S01MassivoResponse)
+def process_s01_massivo(
+    request: S01MassivoRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> S01MassivoResponse:
+    """Genera CSV + XLSX nel formato S01 Massivo dal file Excel caricato."""
+    if not current_user.has_module("connessione"):
+        raise HTTPException(status_code=403, detail="Modulo non abilitato")
+
+    source_path = _resolve_file(request.file_id)
+
+    try:
+        result = genera_s01_massivo(source_path, settings.UPLOAD_DIR)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Errore generazione S01 Massivo: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Errore elaborazione: {exc}") from exc
+
+    _s01_results[result["job_id"]] = {
+        "csv_path": result["csv_path"],
+        "xlsx_path": result["xlsx_path"],
+    }
+
+    log_audit(
+        db, "connessione_s01_massivo",
+        user_id=current_user.id,
+        detail={
+            "file_id": request.file_id,
+            "job_id": result["job_id"],
+            "rows_created": result["rows_created"],
+            "warnings_count": len(result["warnings"]),
+        },
+    )
+
+    logger.info("S01 Massivo job %s: %d righe", result["job_id"], result["rows_created"])
+
+    return S01MassivoResponse(
+        job_id=result["job_id"],
+        rows_created=result["rows_created"],
+        columns=result["columns"],
+        rows_preview=result["rows_preview"],
+        warnings=result["warnings"],
+        download_ready=True,
+    )
+
+
+@router.get("/s01-massivo/download/{job_id}/csv")
+def download_s01_csv(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Download del CSV S01 Massivo."""
+    if job_id not in _s01_results:
+        raise HTTPException(status_code=404, detail="Risultato non trovato")
+
+    csv_path = Path(_s01_results[job_id]["csv_path"])
+    if not csv_path.exists():
+        raise HTTPException(status_code=404, detail="File CSV non trovato su disco")
+
+    return FileResponse(
+        path=csv_path,
+        filename="S01_MASSIVO.csv",
+        media_type="text/csv",
+    )
+
+
+@router.get("/s01-massivo/download/{job_id}/xlsx")
+def download_s01_xlsx(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Download del XLSX S01 Massivo."""
+    if job_id not in _s01_results:
+        raise HTTPException(status_code=404, detail="Risultato non trovato")
+
+    xlsx_path = Path(_s01_results[job_id]["xlsx_path"])
+    if not xlsx_path.exists():
+        raise HTTPException(status_code=404, detail="File XLSX non trovato su disco")
+
+    return FileResponse(
+        path=xlsx_path,
+        filename="S01_MASSIVO.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
